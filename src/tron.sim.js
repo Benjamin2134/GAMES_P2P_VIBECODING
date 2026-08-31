@@ -17,7 +17,6 @@ const TRON = {
   COL_P2: "#ff0055"
 };
 
-// Direcciones ortogonales
 const DIR_VECS = {
   N: { x: 0, y: -1 },
   S: { x: 0, y: 1 },
@@ -41,13 +40,11 @@ class TronSim {
   }
 
   iniciarRonda() {
-    // Moto 1 nace a la izquierda mirando al este; Moto 2 a la derecha mirando al oeste
     const yIni = TRON.H / 2;
     this.motos = {
       1: { x: 160, y: yIni, dir: "E", dirPendiente: "E", turbo: false, turboVal: TRON.TURBO_MAX, viva: true },
       2: { x: TRON.W - 160, y: yIni, dir: "W", dirPendiente: "W", turbo: false, turboVal: TRON.TURBO_MAX, viva: true }
     };
-    // Estelas: lista de vértices de giro [{x, y}]
     this.estelas = {
       1: [{ x: 160, y: yIni }],
       2: [{ x: TRON.W - 160, y: yIni }]
@@ -82,7 +79,6 @@ class TronSim {
   step(dt) {
     if (this.ganador) return;
 
-    // Temporizador de reinicio tras muerte en ronda
     if (this.reinicioEn > 0) {
       this.reinicioEn -= dt;
       if (this.reinicioEn <= 0 && !this.ganador) {
@@ -91,7 +87,6 @@ class TronSim {
       return;
     }
 
-    // Pausa de cuenta regresiva al inicio de cada ronda
     if (this.sirviendo) {
       this.pausaRonda -= dt;
       if (this.pausaRonda <= 0) {
@@ -102,18 +97,16 @@ class TronSim {
 
     const colisiones = { 1: false, 2: false };
 
-    // 1. Mover motos y registrar estelas
     for (let id = 1; id <= 2; id++) {
       const m = this.motos[id];
       if (!m.viva) continue;
 
-      // Aplicar giro pendiente
+      // Giro en 90°
       if (m.dirPendiente !== m.dir && m.dirPendiente !== OPUESTO[m.dir]) {
         m.dir = m.dirPendiente;
         this.estelas[id].push({ x: m.x, y: m.y });
       }
 
-      // Turbo / Boost
       let vel = TRON.VEL_BASE;
       if (m.turbo && m.turboVal > 5) {
         vel = TRON.VEL_TURBO;
@@ -127,43 +120,41 @@ class TronSim {
       m.x += vec.x * vel * dt;
       m.y += vec.y * vel * dt;
 
-      // Colisión contra límites de arena
-      if (m.x <= 0 || m.x >= TRON.W || m.y <= 0 || m.y >= TRON.H) {
+      // Límites de arena
+      if (m.x <= 8 || m.x >= TRON.W - 8 || m.y <= 8 || m.y >= TRON.H - 8) {
         colisiones[id] = true;
         continue;
       }
 
-      // Colisión contra estelas
       const cabezaSeg = { p1: { x: prevX, y: prevY }, p2: { x: m.x, y: m.y } };
-
-      // Contra estela del rival
       const rivalId = id === 1 ? 2 : 1;
+
+      // Colisión contra estela del rival
       if (this._colisionaConEstela(cabezaSeg, rivalId, false)) {
         colisiones[id] = true;
         continue;
       }
 
-      // Contra propia estela (ignora el último segmento inmediato de donde viene)
+      // Colisión contra propia estela
       if (this._colisionaConEstela(cabezaSeg, id, true)) {
         colisiones[id] = true;
         continue;
       }
     }
 
-    // 2. Colisión frontal entre motos
+    // Colisión frontal directa entre motos
     const distMotos = Math.hypot(this.motos[1].x - this.motos[2].x, this.motos[1].y - this.motos[2].y);
-    if (distMotos < 14) {
+    if (distMotos < 18) {
       colisiones[1] = true;
       colisiones[2] = true;
     }
 
-    // 3. Resolver muertes y rondas
     if (colisiones[1] || colisiones[2]) {
       if (colisiones[1]) this.destruirMoto(1);
       if (colisiones[2]) this.destruirMoto(2);
 
       if (colisiones[1] && colisiones[2]) {
-        // Empate en la ronda, reinicio sin punto
+        // Empate en ronda
       } else if (colisiones[1]) {
         this.puntos[2]++;
       } else if (colisiones[2]) {
@@ -190,15 +181,16 @@ class TronSim {
   _colisionaConEstela(segCabeza, idEstela, esPropia) {
     const pts = this.estelas[idEstela];
     const m = this.motos[idEstela];
-    if (pts.length === 0) return false;
+    if (!pts || pts.length === 0) return false;
 
-    // Lista completa de segmentos históricos + el segmento actual hasta la moto
-    const todosPuntos = [...pts, { x: m.x, y: m.y }];
-    const limiteSegs = esPropia ? todosPuntos.length - 2 : todosPuntos.length - 1;
+    const todos = [...pts, { x: m.x, y: m.y }];
+    // Si es la propia estela, ignoramos los 2 últimos segmentos más cercanos a la cabeza
+    const limite = esPropia ? todos.length - 2 : todos.length - 1;
 
-    for (let i = 0; i < limiteSegs; i++) {
-      const s = { p1: todosPuntos[i], p2: todosPuntos[i + 1] };
-      if (this._interseccionSegmentos(segCabeza.p1, segCabeza.p2, s.p1, s.p2)) {
+    for (let i = 0; i < limite; i++) {
+      const pA = todos[i];
+      const pB = todos[i + 1];
+      if (this._interseccionSegmentos(segCabeza.p1, segCabeza.p2, pA, pB)) {
         return true;
       }
     }
@@ -207,7 +199,11 @@ class TronSim {
 
   _interseccionSegmentos(a, b, c, d) {
     const ccw = (p1, p2, p3) => (p3.y - p1.y) * (p2.x - p1.x) > (p2.y - p1.y) * (p3.x - p1.x);
-    return (ccw(a, c, d) !== ccw(b, c, d)) && (ccw(a, b, c) !== ccw(a, b, d));
+    const r1 = ccw(a, c, d);
+    const r2 = ccw(b, c, d);
+    const r3 = ccw(a, b, c);
+    const r4 = ccw(a, b, d);
+    return (r1 !== r2) && (r3 !== r4);
   }
 
   snapshot() {

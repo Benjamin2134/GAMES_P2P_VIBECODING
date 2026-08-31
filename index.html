@@ -1242,7 +1242,6 @@ const TRON = {
   COL_P2: "#ff0055"
 };
 
-// Direcciones ortogonales
 const DIR_VECS = {
   N: { x: 0, y: -1 },
   S: { x: 0, y: 1 },
@@ -1266,13 +1265,11 @@ class TronSim {
   }
 
   iniciarRonda() {
-    // Moto 1 nace a la izquierda mirando al este; Moto 2 a la derecha mirando al oeste
     const yIni = TRON.H / 2;
     this.motos = {
       1: { x: 160, y: yIni, dir: "E", dirPendiente: "E", turbo: false, turboVal: TRON.TURBO_MAX, viva: true },
       2: { x: TRON.W - 160, y: yIni, dir: "W", dirPendiente: "W", turbo: false, turboVal: TRON.TURBO_MAX, viva: true }
     };
-    // Estelas: lista de vértices de giro [{x, y}]
     this.estelas = {
       1: [{ x: 160, y: yIni }],
       2: [{ x: TRON.W - 160, y: yIni }]
@@ -1307,7 +1304,6 @@ class TronSim {
   step(dt) {
     if (this.ganador) return;
 
-    // Temporizador de reinicio tras muerte en ronda
     if (this.reinicioEn > 0) {
       this.reinicioEn -= dt;
       if (this.reinicioEn <= 0 && !this.ganador) {
@@ -1316,7 +1312,6 @@ class TronSim {
       return;
     }
 
-    // Pausa de cuenta regresiva al inicio de cada ronda
     if (this.sirviendo) {
       this.pausaRonda -= dt;
       if (this.pausaRonda <= 0) {
@@ -1327,18 +1322,16 @@ class TronSim {
 
     const colisiones = { 1: false, 2: false };
 
-    // 1. Mover motos y registrar estelas
     for (let id = 1; id <= 2; id++) {
       const m = this.motos[id];
       if (!m.viva) continue;
 
-      // Aplicar giro pendiente
+      // Giro en 90°
       if (m.dirPendiente !== m.dir && m.dirPendiente !== OPUESTO[m.dir]) {
         m.dir = m.dirPendiente;
         this.estelas[id].push({ x: m.x, y: m.y });
       }
 
-      // Turbo / Boost
       let vel = TRON.VEL_BASE;
       if (m.turbo && m.turboVal > 5) {
         vel = TRON.VEL_TURBO;
@@ -1352,43 +1345,41 @@ class TronSim {
       m.x += vec.x * vel * dt;
       m.y += vec.y * vel * dt;
 
-      // Colisión contra límites de arena
-      if (m.x <= 0 || m.x >= TRON.W || m.y <= 0 || m.y >= TRON.H) {
+      // Límites de arena
+      if (m.x <= 8 || m.x >= TRON.W - 8 || m.y <= 8 || m.y >= TRON.H - 8) {
         colisiones[id] = true;
         continue;
       }
 
-      // Colisión contra estelas
       const cabezaSeg = { p1: { x: prevX, y: prevY }, p2: { x: m.x, y: m.y } };
-
-      // Contra estela del rival
       const rivalId = id === 1 ? 2 : 1;
+
+      // Colisión contra estela del rival
       if (this._colisionaConEstela(cabezaSeg, rivalId, false)) {
         colisiones[id] = true;
         continue;
       }
 
-      // Contra propia estela (ignora el último segmento inmediato de donde viene)
+      // Colisión contra propia estela
       if (this._colisionaConEstela(cabezaSeg, id, true)) {
         colisiones[id] = true;
         continue;
       }
     }
 
-    // 2. Colisión frontal entre motos
+    // Colisión frontal directa entre motos
     const distMotos = Math.hypot(this.motos[1].x - this.motos[2].x, this.motos[1].y - this.motos[2].y);
-    if (distMotos < 14) {
+    if (distMotos < 18) {
       colisiones[1] = true;
       colisiones[2] = true;
     }
 
-    // 3. Resolver muertes y rondas
     if (colisiones[1] || colisiones[2]) {
       if (colisiones[1]) this.destruirMoto(1);
       if (colisiones[2]) this.destruirMoto(2);
 
       if (colisiones[1] && colisiones[2]) {
-        // Empate en la ronda, reinicio sin punto
+        // Empate en ronda
       } else if (colisiones[1]) {
         this.puntos[2]++;
       } else if (colisiones[2]) {
@@ -1415,15 +1406,16 @@ class TronSim {
   _colisionaConEstela(segCabeza, idEstela, esPropia) {
     const pts = this.estelas[idEstela];
     const m = this.motos[idEstela];
-    if (pts.length === 0) return false;
+    if (!pts || pts.length === 0) return false;
 
-    // Lista completa de segmentos históricos + el segmento actual hasta la moto
-    const todosPuntos = [...pts, { x: m.x, y: m.y }];
-    const limiteSegs = esPropia ? todosPuntos.length - 2 : todosPuntos.length - 1;
+    const todos = [...pts, { x: m.x, y: m.y }];
+    // Si es la propia estela, ignoramos los 2 últimos segmentos más cercanos a la cabeza
+    const limite = esPropia ? todos.length - 2 : todos.length - 1;
 
-    for (let i = 0; i < limiteSegs; i++) {
-      const s = { p1: todosPuntos[i], p2: todosPuntos[i + 1] };
-      if (this._interseccionSegmentos(segCabeza.p1, segCabeza.p2, s.p1, s.p2)) {
+    for (let i = 0; i < limite; i++) {
+      const pA = todos[i];
+      const pB = todos[i + 1];
+      if (this._interseccionSegmentos(segCabeza.p1, segCabeza.p2, pA, pB)) {
         return true;
       }
     }
@@ -1432,7 +1424,11 @@ class TronSim {
 
   _interseccionSegmentos(a, b, c, d) {
     const ccw = (p1, p2, p3) => (p3.y - p1.y) * (p2.x - p1.x) > (p2.y - p1.y) * (p3.x - p1.x);
-    return (ccw(a, c, d) !== ccw(b, c, d)) && (ccw(a, b, c) !== ccw(a, b, d));
+    const r1 = ccw(a, c, d);
+    const r2 = ccw(b, c, d);
+    const r3 = ccw(a, b, c);
+    const r4 = ccw(a, b, d);
+    return (r1 !== r2) && (r3 !== r4);
   }
 
   snapshot() {
@@ -3224,7 +3220,7 @@ if (typeof module !== "undefined" && module.exports) {
 
   let sim = null;
   let snap = null;
-  let animId = null;
+  let sirviendoPrevio = true;
 
   // Estado local de input
   const inputLocal = {
@@ -3232,7 +3228,6 @@ if (typeof module !== "undefined" && module.exports) {
     turbo: false
   };
 
-  // Partículas de explosión locales para render
   let particulas = [];
 
   function onKeyDown(e) {
@@ -3289,6 +3284,7 @@ if (typeof module !== "undefined" && module.exports) {
       sim = new TronSim();
       snap = null;
       particulas = [];
+      sirviendoPrevio = true;
       inputLocal.dir = "E";
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
@@ -3299,6 +3295,7 @@ if (typeof module !== "undefined" && module.exports) {
       sim = null;
       snap = null;
       particulas = [];
+      sirviendoPrevio = true;
       inputLocal.dir = "W";
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
@@ -3336,7 +3333,6 @@ if (typeof module !== "undefined" && module.exports) {
     },
 
     frame(now, dtSeg, pausado) {
-      // Loop del Host a 120 Hz
       if (net.rol === 1 && sim) {
         if (!pausado) {
           sim.step(dtSeg);
@@ -3347,6 +3343,15 @@ if (typeof module !== "undefined" && module.exports) {
         }
         snap = sim.snapshot();
         net.enviar({ t: "e", snap });
+      }
+
+      // Reinicio de dirección por ronda
+      if (snap) {
+        if (snap.sirviendo && !sirviendoPrevio) {
+          inputLocal.dir = net.rol === 1 ? "E" : "W";
+          inputLocal.turbo = false;
+        }
+        sirviendoPrevio = snap.sirviendo;
       }
 
       renderTron(dtSeg);
@@ -3381,41 +3386,32 @@ if (typeof module !== "undefined" && module.exports) {
   //  RENDERIZADO CANVAS 2D (Estética Cyber Neon 1982)
   // ==========================================================================
   function renderTron(dtSeg) {
-    // Fondo de arena oscura
     ctx.fillStyle = "#04060f";
     ctx.fillRect(0, 0, K.W, K.H);
 
-    // Cuadrícula Cyber Grid en perspectiva / neón tenue
     ctx.strokeStyle = "rgba(0, 240, 255, 0.04)";
     ctx.lineWidth = 1;
     for (let x = 0; x < K.W; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, K.H); ctx.stroke(); }
     for (let y = 0; y < K.H; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(K.W, y); ctx.stroke(); }
 
-    // Borde perimetral mortal (Arena Boundary)
-    ctx.strokeStyle = "rgba(0, 240, 255, 0.3)";
+    ctx.strokeStyle = "rgba(0, 240, 255, 0.4)";
     ctx.lineWidth = 3;
     ctx.strokeRect(0, 0, K.W, K.H);
 
     if (!snap) return;
 
-    // 1. Dibujar Estelas Vectoriales Continuas
     dibujarEstela(snap.e1, snap.m1, K.COL_P1);
     dibujarEstela(snap.e2, snap.m2, K.COL_P2);
 
-    // 2. Dibujar Motos de Luz
     if (snap.m1 && snap.m1.viva) dibujarMoto(snap.m1.x, snap.m1.y, snap.m1.dir, K.COL_P1, snap.m1.turbo);
     if (snap.m2 && snap.m2.viva) dibujarMoto(snap.m2.x, snap.m2.y, snap.m2.dir, K.COL_P2, snap.m2.turbo);
 
-    // 3. Renderizar Partículas de Explosión
     renderParticulas(dtSeg);
-
-    // 4. Marcador y Turbo HUD Superior
     renderHUD();
 
-    // 5. Cuenta Regresiva al Iniciar Ronda
     if (snap.sirviendo) {
       ctx.save();
-      ctx.font = "bold 44px monospace";
+      ctx.font = "bold 40px monospace";
       ctx.fillStyle = "#00f0ff";
       ctx.textAlign = "center";
       ctx.shadowColor = "#00f0ff";
@@ -3441,13 +3437,11 @@ if (typeof module !== "undefined" && module.exports) {
     for (let i = 1; i < puntos.length; i++) {
       ctx.lineTo(puntos[i].x, puntos[i].y);
     }
-    // Conectar hasta la cabeza actual de la moto si sigue viva
     if (moto.viva) {
       ctx.lineTo(moto.x, moto.y);
     }
     ctx.stroke();
 
-    // Núcleo blanco brillante en el centro de la estela
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1.5;
     ctx.shadowBlur = 0;
@@ -3460,7 +3454,6 @@ if (typeof module !== "undefined" && module.exports) {
     ctx.save();
     ctx.translate(x, y);
 
-    // Rotación según dirección
     let rad = 0;
     if (dir === "E") rad = 0;
     else if (dir === "S") rad = Math.PI / 2;
@@ -3472,21 +3465,18 @@ if (typeof module !== "undefined" && module.exports) {
     ctx.shadowColor = color;
     ctx.shadowBlur = 12;
 
-    // Cuerpo aerodinámico de la Lightcycle
     ctx.beginPath();
-    ctx.moveTo(10, 0);       // Punta delantera
-    ctx.lineTo(-8, -5);     // Lateral izquierdo
-    ctx.lineTo(-12, -3);    // Rueda trasera izquierda
-    ctx.lineTo(-12, 3);     // Rueda trasera derecha
-    ctx.lineTo(-8, 5);      // Lateral derecho
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-8, -5);
+    ctx.lineTo(-12, -3);
+    ctx.lineTo(-12, 3);
+    ctx.lineTo(-8, 5);
     ctx.closePath();
     ctx.fill();
 
-    // Rueda delantera brillante
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(4, -2, 6, 4);
 
-    // Resplandor de Turbo
     if (turbo) {
       ctx.fillStyle = "#ffaa00";
       ctx.fillRect(-16, -3, 5, 6);
@@ -3504,7 +3494,6 @@ if (typeof module !== "undefined" && module.exports) {
         vx: Math.cos(ang) * vel,
         vy: Math.sin(ang) * vel,
         vida: 0.8 + Math.random() * 0.4,
-        vidaMax: 1.2,
         color
       });
     }
@@ -3531,7 +3520,6 @@ if (typeof module !== "undefined" && module.exports) {
 
   function renderHUD() {
     ctx.save();
-    // 1. Marcador de Rondas
     ctx.font = "bold 20px monospace";
     ctx.fillStyle = K.COL_P1;
     ctx.textAlign = "left";
@@ -3541,23 +3529,19 @@ if (typeof module !== "undefined" && module.exports) {
     ctx.textAlign = "right";
     ctx.fillText(`P2 (MAGENTA): ${"◆ ".repeat(snap.p2)}`, K.W - 24, 34);
 
-    // 2. Barra de Turbo de cada jugador
     const tbP1 = snap.m1 ? snap.m1.tb : 0;
     const tbP2 = snap.m2 ? snap.m2.tb : 0;
 
-    // Barra P1 (Izquierda)
     ctx.fillStyle = "rgba(0, 240, 255, 0.15)";
     ctx.fillRect(24, 46, 160, 8);
     ctx.fillStyle = K.COL_P1;
     ctx.fillRect(24, 46, (tbP1 / 100) * 160, 8);
 
-    // Barra P2 (Derecha)
     ctx.fillStyle = "rgba(255, 0, 85, 0.15)";
     ctx.fillRect(K.W - 184, 46, 160, 8);
     ctx.fillStyle = K.COL_P2;
     ctx.fillRect(K.W - 184 + (1 - tbP2 / 100) * 160, 46, (tbP2 / 100) * 160, 8);
 
-    // Controles en el centro superior
     ctx.font = "12px monospace";
     ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
     ctx.textAlign = "center";
@@ -3570,7 +3554,7 @@ if (typeof module !== "undefined" && module.exports) {
 
 // ==========================================================================
 //  Módulo de juego: MONOPOLY DUEL (Board Tycoon)  -  JUEGOS.monopoly
-//  Tablero perimetral 24 casillas, tirada de dados, compras, casas y bancarrota.
+//  Tablero perimetral 24 casillas cuadradas perfectas, dados, compras y bancarrota.
 //  Usa los globales del shell: cv, ctx, net.
 // ==========================================================================
 
@@ -3579,68 +3563,63 @@ if (typeof module !== "undefined" && module.exports) {
 
   let sim = null;
   let snap = null;
-  let animDados = 0; // Temporizador para animación visual de dados
+  let animDados = 0;
 
-  // Posiciones de las 24 casillas en el canvas (Centro: x: 230..730, y: 50..550)
-  const BOARD_X = 230;
+  // Parámetros de geometría del tablero (Canvas W: 960, H: 600)
+  const BOARD_X = 210;
   const BOARD_Y = 30;
-  const BOARD_SIZE = 500;
+  const BOARD_SIZE = 540;
+  const ESQUINA_SIZE = 85;
+  const N_INTERMEDIAS = 5; // 5 casillas intermedias por lado (5 * 4 + 4 esquinas = 24 casillas)
+  const CALLE_SIZE = (BOARD_SIZE - ESQUINA_SIZE * 2) / N_INTERMEDIAS; // (540 - 170) / 5 = 74 px
+
   const CASILLAS_POS = [];
 
-  // Calcular posiciones (x, y, w, h) de las 24 casillas alrededor del perímetro 6x6
-  (function calcularPosicionesCasillas() {
-    const nLado = 6; // 6 casillas por lado (esquinas compartidas)
-    const esquinaSize = 90;
-    const calleSize = (BOARD_SIZE - esquinaSize * 2) / 4; // 80px cada calle intermedia
-
-    // 0: Abajo-Derecha (SALIDA)
-    // 0..6: Borde Inferior (de derecha a izquierda)
-    // 6..12: Borde Izquierdo (de abajo a arriba)
-    // 12..18: Borde Superior (de izquierda a derecha)
-    // 18..23: Borde Derecho (de arriba a abajo)
-
+  // Calcular posiciones exactas sin solape de las 24 casillas
+  (function calcularPosiciones() {
     for (let i = 0; i < 24; i++) {
-      let x = 0, y = 0, w = calleSize, h = calleSize;
+      let x = 0, y = 0, w = CALLE_SIZE, h = CALLE_SIZE;
+
       if (i === 0) {
-        // Salida (Abajo-Derecha)
-        x = BOARD_X + BOARD_SIZE - esquinaSize;
-        y = BOARD_Y + BOARD_SIZE - esquinaSize;
-        w = esquinaSize; h = esquinaSize;
+        // Esquina Inferior Derecha (SALIDA)
+        x = BOARD_X + BOARD_SIZE - ESQUINA_SIZE;
+        y = BOARD_Y + BOARD_SIZE - ESQUINA_SIZE;
+        w = ESQUINA_SIZE; h = ESQUINA_SIZE;
       } else if (i >= 1 && i <= 5) {
-        // Borde Inferior
-        x = BOARD_X + BOARD_SIZE - esquinaSize - i * calleSize;
-        y = BOARD_Y + BOARD_SIZE - esquinaSize;
-        w = calleSize; h = esquinaSize;
+        // Borde Inferior (de derecha a izquierda)
+        x = BOARD_X + BOARD_SIZE - ESQUINA_SIZE - i * CALLE_SIZE;
+        y = BOARD_Y + BOARD_SIZE - ESQUINA_SIZE;
+        w = CALLE_SIZE; h = ESQUINA_SIZE;
       } else if (i === 6) {
-        // Cárcel (Abajo-Izquierda)
+        // Esquina Inferior Izquierda (CÁRCEL)
         x = BOARD_X;
-        y = BOARD_Y + BOARD_SIZE - esquinaSize;
-        w = esquinaSize; h = esquinaSize;
+        y = BOARD_Y + BOARD_SIZE - ESQUINA_SIZE;
+        w = ESQUINA_SIZE; h = ESQUINA_SIZE;
       } else if (i >= 7 && i <= 11) {
-        // Borde Izquierdo
+        // Borde Izquierdo (de abajo hacia arriba)
         x = BOARD_X;
-        y = BOARD_Y + BOARD_SIZE - esquinaSize - (i - 6) * calleSize;
-        w = esquinaSize; h = calleSize;
+        y = BOARD_Y + BOARD_SIZE - ESQUINA_SIZE - (i - 6) * CALLE_SIZE;
+        w = ESQUINA_SIZE; h = CALLE_SIZE;
       } else if (i === 12) {
-        // Parking Libre (Arriba-Izquierda)
+        // Esquina Superior Izquierda (PARKING LIBRE)
         x = BOARD_X;
         y = BOARD_Y;
-        w = esquinaSize; h = esquinaSize;
+        w = ESQUINA_SIZE; h = ESQUINA_SIZE;
       } else if (i >= 13 && i <= 17) {
-        // Borde Superior
-        x = BOARD_X + esquinaSize + (i - 13) * calleSize;
+        // Borde Superior (de izquierda a derecha)
+        x = BOARD_X + ESQUINA_SIZE + (i - 13) * CALLE_SIZE;
         y = BOARD_Y;
-        w = calleSize; h = esquinaSize;
+        w = CALLE_SIZE; h = ESQUINA_SIZE;
       } else if (i === 18) {
-        // Ve a la Cárcel (Arriba-Derecha)
-        x = BOARD_X + BOARD_SIZE - esquinaSize;
+        // Esquina Superior Derecha (VE A LA CÁRCEL)
+        x = BOARD_X + BOARD_SIZE - ESQUINA_SIZE;
         y = BOARD_Y;
-        w = esquinaSize; h = esquinaSize;
+        w = ESQUINA_SIZE; h = ESQUINA_SIZE;
       } else if (i >= 19 && i <= 23) {
-        // Borde Derecho
-        x = BOARD_X + BOARD_SIZE - esquinaSize;
-        y = BOARD_Y + esquinaSize + (i - 19) * calleSize;
-        w = esquinaSize; h = calleSize;
+        // Borde Derecho (de arriba hacia abajo)
+        x = BOARD_X + BOARD_SIZE - ESQUINA_SIZE;
+        y = BOARD_Y + ESQUINA_SIZE + (i - 19) * CALLE_SIZE;
+        w = ESQUINA_SIZE; h = CALLE_SIZE;
       }
       CASILLAS_POS.push({ x, y, w, h });
     }
@@ -3660,42 +3639,52 @@ if (typeof module !== "undefined" && module.exports) {
     const miTurno = snap.turno === net.rol;
     if (!miTurno) return;
 
-    // 1. Botón Tirar Dados en el centro (x: 410, y: 310, w: 140, h: 42)
+    // 1. Botón Tirar Dados (Centro)
     if (snap.fase === "tirar") {
-      if (m.x >= 410 && m.x <= 550 && m.y >= 310 && m.y <= 352) {
+      if (m.x >= 410 && m.x <= 550 && m.y >= 310 && m.y <= 355) {
         ejecutarTirada();
         return;
       }
     }
 
-    // 2. Botón Comprar Propiedad (x: 350, y: 380, w: 120, h: 36)
+    // 2. Fase de Acción
     if (snap.fase === "accion") {
       const j = net.rol === 1 ? snap.j1 : snap.j2;
       const c = K.CASILLAS[j.pos];
-      const esComprable = (c.t === "calle" || c.t === "estacion") && !snap.props[c.idx] && j.dinero >= c.precio;
+      const prop = snap.props[c.idx];
+      const esComprable = (c.t === "calle" || c.t === "estacion") && !prop && j.dinero >= c.precio;
 
-      if (esComprable && m.x >= 350 && m.x <= 470 && m.y >= 380 && m.y <= 416) {
-        ejecutarCompra();
-        return;
+      if (esComprable) {
+        // Botón Comprar
+        if (m.x >= 350 && m.x <= 470 && m.y >= 380 && m.y <= 420) {
+          ejecutarCompra();
+          return;
+        }
+        // Botón Pasar Turno (a la derecha)
+        if (m.x >= 490 && m.x <= 610 && m.y >= 380 && m.y <= 420) {
+          ejecutarPasarTurno();
+          return;
+        }
+      } else {
+        // Botón Pasar Turno (centrado)
+        if (m.x >= 410 && m.x <= 550 && m.y >= 380 && m.y <= 420) {
+          ejecutarPasarTurno();
+          return;
+        }
       }
 
-      // Botón Pasar Turno (x: 490, y: 380, w: 120, h: 36)
-      if (m.x >= 490 && m.x <= 610 && m.y >= 380 && m.y <= 416) {
-        ejecutarPasarTurno();
-        return;
-      }
-
-      // Botón Construir Casa si corresponde (x: 410, y: 425, w: 140, h: 32)
-      const propMía = snap.props[c.idx] && snap.props[c.idx].duenio === net.rol && c.t === "calle" && snap.props[c.idx].casas < 3 && j.dinero >= c.casa;
-      if (propMía && m.x >= 410 && m.x <= 550 && m.y >= 425 && m.y <= 457) {
-        ejecutarConstruir(c.idx);
-        return;
+      // Botón Construir Casa (+1 Casa)
+      if (prop && prop.duenio === net.rol && c.t === "calle" && prop.casas < 3 && j.dinero >= c.casa) {
+        if (m.x >= 410 && m.x <= 550 && m.y >= 430 && m.y <= 465) {
+          ejecutarConstruir(c.idx);
+          return;
+        }
       }
     }
   }
 
   function ejecutarTirada() {
-    animDados = 0.5;
+    animDados = 0.45;
     RetroAudio.playPongBeep(true);
 
     if (net.rol === 1 && sim) {
@@ -3818,63 +3807,52 @@ if (typeof module !== "undefined" && module.exports) {
   //  RENDERIZADO CANVAS 2D (Estética Board Tycoon Art Decó)
   // ==========================================================================
   function renderMonopoly() {
-    // Fondo de mesa de paño verde oscuro
-    ctx.fillStyle = "#0c1813";
+    ctx.fillStyle = "#0a1610";
     ctx.fillRect(0, 0, K.W, K.H);
 
     if (!snap) return;
 
-    // 1. Render Tablero Perimetral
     renderTablero();
-
-    // 2. Render Fichas de Jugadores
     renderFichas();
-
-    // 3. Render Centro del Tablero (Dados, Acciones y Eventos)
     renderCentro();
-
-    // 4. Render Paneles Laterales (Patrimonio J1 y J2)
     renderPanelesLaterales();
   }
 
   function renderTablero() {
-    // Fondo central del tablero
-    ctx.fillStyle = "#12241d";
+    ctx.fillStyle = "#10231b";
     ctx.fillRect(BOARD_X, BOARD_Y, BOARD_SIZE, BOARD_SIZE);
-    ctx.strokeStyle = "#2d5243";
+    ctx.strokeStyle = "#294d3c";
     ctx.lineWidth = 3;
     ctx.strokeRect(BOARD_X, BOARD_Y, BOARD_SIZE, BOARD_SIZE);
 
-    // Dibujar cada casilla
     for (let i = 0; i < 24; i++) {
       const c = K.CASILLAS[i];
       const pos = CASILLAS_POS[i];
 
-      // Fondo de casilla
-      ctx.fillStyle = "#e9dec9";
+      // Fondo de casilla pergamino
+      ctx.fillStyle = "#ebdcc2";
       ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
-      ctx.strokeStyle = "#382e25";
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#423223";
+      ctx.lineWidth = 1.2;
       ctx.strokeRect(pos.x, pos.y, pos.w, pos.h);
 
       // Franja de color del grupo de la calle
       if (c.col && c.t === "calle") {
         ctx.fillStyle = c.col;
-        ctx.fillRect(pos.x + 1, pos.y + 1, pos.w - 2, 14);
+        ctx.fillRect(pos.x + 1, pos.y + 1, pos.w - 2, 13);
       }
 
-      // Nombre y precio
+      // Nombre de la casilla
       ctx.font = "bold 9px sans-serif";
-      ctx.fillStyle = "#1a1a1a";
+      ctx.fillStyle = "#111111";
       ctx.textAlign = "center";
-
-      // Abreviar o ajustar nombre
       const nombreCorto = c.nombre.length > 12 ? c.nombre.substring(0, 11) + "." : c.nombre;
       ctx.fillText(nombreCorto, pos.x + pos.w / 2, pos.y + pos.h / 2);
 
+      // Precio si es comprable
       if (c.precio) {
-        ctx.font = "bold 9px sans-serif";
-        ctx.fillStyle = "#27ae60";
+        ctx.font = "bold 9px monospace";
+        ctx.fillStyle = "#1e7e34";
         ctx.fillText(`$${c.precio}`, pos.x + pos.w / 2, pos.y + pos.h - 6);
       }
 
@@ -3883,11 +3861,11 @@ if (typeof module !== "undefined" && module.exports) {
       if (prop) {
         const colDuenio = prop.duenio === 1 ? "#00e5ff" : "#ff0055";
         ctx.fillStyle = colDuenio;
-        ctx.fillRect(pos.x + pos.w - 12, pos.y + 2, 10, 10);
+        ctx.fillRect(pos.x + pos.w - 11, pos.y + 2, 9, 9);
 
         if (prop.casas > 0) {
           ctx.font = "bold 10px sans-serif";
-          ctx.fillStyle = "#f1c40f";
+          ctx.fillStyle = "#f39c12";
           ctx.fillText("★".repeat(prop.casas), pos.x + pos.w / 2, pos.y + pos.h - 18);
         }
       }
@@ -3895,22 +3873,20 @@ if (typeof module !== "undefined" && module.exports) {
   }
 
   function renderFichas() {
-    // Posición J1 (Cian)
     const p1 = CASILLAS_POS[snap.j1.pos];
     ctx.fillStyle = "#00e5ff";
     ctx.shadowColor = "#00e5ff";
     ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.arc(p1.x + p1.w * 0.35, p1.y + p1.h * 0.7, 8, 0, Math.PI * 2);
+    ctx.arc(p1.x + p1.w * 0.35, p1.y + p1.h * 0.7, 7.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Posición J2 (Magenta)
     const p2 = CASILLAS_POS[snap.j2.pos];
     ctx.fillStyle = "#ff0055";
     ctx.shadowColor = "#ff0055";
     ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.arc(p2.x + p2.w * 0.65, p2.y + p2.h * 0.7, 8, 0, Math.PI * 2);
+    ctx.arc(p2.x + p2.w * 0.65, p2.y + p2.h * 0.7, 7.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
   }
@@ -3920,29 +3896,29 @@ if (typeof module !== "undefined" && module.exports) {
     const jAct = snap.turno === 1 ? snap.j1 : snap.j2;
     const cAct = K.CASILLAS[jAct.pos];
 
-    // Título del Centro
+    // Turno Actual
     ctx.font = "bold 18px sans-serif";
     ctx.fillStyle = snap.turno === 1 ? "#00e5ff" : "#ff0055";
     ctx.textAlign = "center";
-    ctx.fillText(`TURNO: JUGADOR ${snap.turno}`, BOARD_X + BOARD_SIZE / 2, BOARD_Y + 110);
+    ctx.fillText(`TURNO: JUGADOR ${snap.turno} ${miTurno ? '(TÚ)' : ''}`, BOARD_X + BOARD_SIZE / 2, BOARD_Y + 115);
 
     // Evento reciente
     if (snap.evento) {
       ctx.font = "12px sans-serif";
       ctx.fillStyle = "#e0e0e0";
-      ctx.fillText(snap.evento.msg, BOARD_X + BOARD_SIZE / 2, BOARD_Y + 140);
+      ctx.fillText(snap.evento.msg, BOARD_X + BOARD_SIZE / 2, BOARD_Y + 145);
     }
 
     // Bote de Parking
-    ctx.font = "bold 12px sans-serif";
+    ctx.font = "bold 13px sans-serif";
     ctx.fillStyle = "#f39c12";
-    ctx.fillText(`🅿️ BOTE PARKING: $${snap.parking}`, BOARD_X + BOARD_SIZE / 2, BOARD_Y + 175);
+    ctx.fillText(`🅿️ BOTE PARKING: $${snap.parking}`, BOARD_X + BOARD_SIZE / 2, BOARD_Y + 180);
 
-    // Dados
+    // Animación de Dados
     const d1 = animDados > 0 ? Math.floor(Math.random() * 6) + 1 : snap.dados[0];
     const d2 = animDados > 0 ? Math.floor(Math.random() * 6) + 1 : snap.dados[1];
-    dibujarDado(BOARD_X + BOARD_SIZE / 2 - 40, BOARD_Y + 220, d1);
-    dibujarDado(BOARD_X + BOARD_SIZE / 2 + 10, BOARD_Y + 220, d2);
+    dibujarDado(BOARD_X + BOARD_SIZE / 2 - 38, BOARD_Y + 215, d1);
+    dibujarDado(BOARD_X + BOARD_SIZE / 2 + 6, BOARD_Y + 215, d2);
 
     // Botones según fase
     if (snap.fase === "tirar" && miTurno) {
@@ -3959,25 +3935,30 @@ if (typeof module !== "undefined" && module.exports) {
 
       if (esComprable) {
         ctx.fillStyle = "#27ae60";
-        ctx.fillRect(350, 380, 120, 36);
+        ctx.fillRect(350, 380, 120, 38);
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 12px sans-serif";
-        ctx.fillText(`COMPRAR ($${cAct.precio})`, 410, 402);
+        ctx.fillText(`COMPRAR ($${cAct.precio})`, 410, 403);
+
+        ctx.fillStyle = "#e74c3c";
+        ctx.fillRect(490, 380, 120, 38);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillText("PASAR TURNO", 550, 403);
+      } else {
+        ctx.fillStyle = "#e74c3c";
+        ctx.fillRect(410, 380, 140, 38);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillText("PASAR TURNO", 480, 403);
       }
 
-      ctx.fillStyle = "#e74c3c";
-      ctx.fillRect(490, 380, 120, 36);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 12px sans-serif";
-      ctx.fillText("PASAR TURNO", 550, 402);
-
-      // Mejorar casa si tiene monopolio
       if (prop && prop.duenio === net.rol && cAct.t === "calle" && prop.casas < 3 && jAct.dinero >= cAct.casa) {
         ctx.fillStyle = "#f39c12";
-        ctx.fillRect(410, 425, 140, 32);
+        ctx.fillRect(410, 430, 140, 32);
         ctx.fillStyle = "#000000";
         ctx.font = "bold 11px sans-serif";
-        ctx.fillText(`+1 CASA ($${cAct.casa})`, 480, 445);
+        ctx.fillText(`+1 CASA ($${cAct.casa})`, 480, 450);
       }
     }
   }
@@ -3991,63 +3972,59 @@ if (typeof module !== "undefined" && module.exports) {
 
     ctx.fillStyle = "#000000";
     const cx = x + 16, cy = y + 16;
-    if (val % 2 === 1) ctx.fillRect(cx - 2, cy - 2, 4, 4); // Centro
+    if (val % 2 === 1) ctx.fillRect(cx - 2, cy - 2, 4, 4);
     if (val > 1) { ctx.fillRect(x + 5, y + 5, 4, 4); ctx.fillRect(x + 23, y + 23, 4, 4); }
     if (val > 3) { ctx.fillRect(x + 23, y + 5, 4, 4); ctx.fillRect(x + 5, y + 23, 4, 4); }
     if (val === 6) { ctx.fillRect(x + 5, cy - 2, 4, 4); ctx.fillRect(x + 23, cy - 2, 4, 4); }
   }
 
   function renderPanelesLaterales() {
-    // Panel J1 (Izquierda: x: 20..210, y: 30..530)
-    renderPanelJugador(20, 30, 190, 500, snap.j1, 1, "#00e5ff");
-
-    // Panel J2 (Derecha: x: 750..940, y: 30..530)
-    renderPanelJugador(750, 30, 190, 500, snap.j2, 2, "#ff0055");
+    renderPanelJugador(15, 30, 180, 540, snap.j1, 1, "#00e5ff");
+    renderPanelJugador(765, 30, 180, 540, snap.j2, 2, "#ff0055");
   }
 
   function renderPanelJugador(x, y, w, h, j, id, col) {
-    ctx.fillStyle = "#0d1a15";
+    ctx.fillStyle = "#0d1c15";
     ctx.strokeStyle = col;
     ctx.lineWidth = 2;
     ctx.fillRect(x, y, w, h);
     ctx.strokeRect(x, y, w, h);
 
-    ctx.font = "bold 15px sans-serif";
+    ctx.font = "bold 14px sans-serif";
     ctx.fillStyle = col;
     ctx.textAlign = "left";
-    ctx.fillText(`JUGADOR ${id} ${id === net.rol ? '(TÚ)' : ''}`, x + 12, y + 28);
+    ctx.fillText(`JUGADOR ${id} ${id === net.rol ? '(TÚ)' : ''}`, x + 10, y + 26);
 
-    ctx.font = "bold 18px monospace";
+    ctx.font = "bold 17px monospace";
     ctx.fillStyle = "#2ecc71";
-    ctx.fillText(`$${j.dinero}`, x + 12, y + 58);
+    ctx.fillText(`$${j.dinero}`, x + 10, y + 54);
 
-    ctx.font = "12px sans-serif";
+    ctx.font = "11px sans-serif";
     ctx.fillStyle = "#88b090";
-    ctx.fillText(`Patrimonio: $${j.pat}`, x + 12, y + 80);
+    ctx.fillText(`Patrimonio: $${j.pat}`, x + 10, y + 74);
 
     if (j.enCarcel) {
       ctx.fillStyle = "#e74c3c";
-      ctx.fillText(`🚨 EN CÁRCEL (${j.turnosCarcel}/3)`, x + 12, y + 104);
+      ctx.fillText(`🚨 EN CÁRCEL (${j.turnosCarcel}/3)`, x + 10, y + 96);
     }
 
-    // Listado de Propiedades
-    ctx.font = "bold 12px sans-serif";
+    ctx.font = "bold 11px sans-serif";
     ctx.fillStyle = "#ffffff";
-    ctx.fillText("PROPIEDADES:", x + 12, y + 130);
+    ctx.fillText("PROPIEDADES:", x + 10, y + 120);
 
-    let py = y + 150;
+    let py = y + 140;
     for (let idx in snap.props) {
       const p = snap.props[idx];
       if (p.duenio === id) {
         const c = K.CASILLAS[idx];
         ctx.fillStyle = c.col || "#bdc3c7";
-        ctx.fillRect(x + 12, py - 10, 8, 8);
+        ctx.fillRect(x + 10, py - 9, 8, 8);
 
-        ctx.font = "11px sans-serif";
+        ctx.font = "10px sans-serif";
         ctx.fillStyle = "#e0e0e0";
         const estrellas = p.casas > 0 ? ` (${"★".repeat(p.casas)})` : "";
-        ctx.fillText(`${c.nombre}${estrellas}`, x + 24, py - 2);
-        py += 18;
+        ctx.fillText(`${c.nombre}${estrellas}`, x + 22, py - 2);
+        py += 17;
       }
     }
   }

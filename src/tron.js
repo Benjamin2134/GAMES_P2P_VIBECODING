@@ -9,7 +9,7 @@
 
   let sim = null;
   let snap = null;
-  let animId = null;
+  let sirviendoPrevio = true;
 
   // Estado local de input
   const inputLocal = {
@@ -17,7 +17,6 @@
     turbo: false
   };
 
-  // Partículas de explosión locales para render
   let particulas = [];
 
   function onKeyDown(e) {
@@ -74,6 +73,7 @@
       sim = new TronSim();
       snap = null;
       particulas = [];
+      sirviendoPrevio = true;
       inputLocal.dir = "E";
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
@@ -84,6 +84,7 @@
       sim = null;
       snap = null;
       particulas = [];
+      sirviendoPrevio = true;
       inputLocal.dir = "W";
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
@@ -121,7 +122,6 @@
     },
 
     frame(now, dtSeg, pausado) {
-      // Loop del Host a 120 Hz
       if (net.rol === 1 && sim) {
         if (!pausado) {
           sim.step(dtSeg);
@@ -132,6 +132,15 @@
         }
         snap = sim.snapshot();
         net.enviar({ t: "e", snap });
+      }
+
+      // Reinicio de dirección por ronda
+      if (snap) {
+        if (snap.sirviendo && !sirviendoPrevio) {
+          inputLocal.dir = net.rol === 1 ? "E" : "W";
+          inputLocal.turbo = false;
+        }
+        sirviendoPrevio = snap.sirviendo;
       }
 
       renderTron(dtSeg);
@@ -166,41 +175,32 @@
   //  RENDERIZADO CANVAS 2D (Estética Cyber Neon 1982)
   // ==========================================================================
   function renderTron(dtSeg) {
-    // Fondo de arena oscura
     ctx.fillStyle = "#04060f";
     ctx.fillRect(0, 0, K.W, K.H);
 
-    // Cuadrícula Cyber Grid en perspectiva / neón tenue
     ctx.strokeStyle = "rgba(0, 240, 255, 0.04)";
     ctx.lineWidth = 1;
     for (let x = 0; x < K.W; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, K.H); ctx.stroke(); }
     for (let y = 0; y < K.H; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(K.W, y); ctx.stroke(); }
 
-    // Borde perimetral mortal (Arena Boundary)
-    ctx.strokeStyle = "rgba(0, 240, 255, 0.3)";
+    ctx.strokeStyle = "rgba(0, 240, 255, 0.4)";
     ctx.lineWidth = 3;
     ctx.strokeRect(0, 0, K.W, K.H);
 
     if (!snap) return;
 
-    // 1. Dibujar Estelas Vectoriales Continuas
     dibujarEstela(snap.e1, snap.m1, K.COL_P1);
     dibujarEstela(snap.e2, snap.m2, K.COL_P2);
 
-    // 2. Dibujar Motos de Luz
     if (snap.m1 && snap.m1.viva) dibujarMoto(snap.m1.x, snap.m1.y, snap.m1.dir, K.COL_P1, snap.m1.turbo);
     if (snap.m2 && snap.m2.viva) dibujarMoto(snap.m2.x, snap.m2.y, snap.m2.dir, K.COL_P2, snap.m2.turbo);
 
-    // 3. Renderizar Partículas de Explosión
     renderParticulas(dtSeg);
-
-    // 4. Marcador y Turbo HUD Superior
     renderHUD();
 
-    // 5. Cuenta Regresiva al Iniciar Ronda
     if (snap.sirviendo) {
       ctx.save();
-      ctx.font = "bold 44px monospace";
+      ctx.font = "bold 40px monospace";
       ctx.fillStyle = "#00f0ff";
       ctx.textAlign = "center";
       ctx.shadowColor = "#00f0ff";
@@ -226,13 +226,11 @@
     for (let i = 1; i < puntos.length; i++) {
       ctx.lineTo(puntos[i].x, puntos[i].y);
     }
-    // Conectar hasta la cabeza actual de la moto si sigue viva
     if (moto.viva) {
       ctx.lineTo(moto.x, moto.y);
     }
     ctx.stroke();
 
-    // Núcleo blanco brillante en el centro de la estela
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1.5;
     ctx.shadowBlur = 0;
@@ -245,7 +243,6 @@
     ctx.save();
     ctx.translate(x, y);
 
-    // Rotación según dirección
     let rad = 0;
     if (dir === "E") rad = 0;
     else if (dir === "S") rad = Math.PI / 2;
@@ -257,21 +254,18 @@
     ctx.shadowColor = color;
     ctx.shadowBlur = 12;
 
-    // Cuerpo aerodinámico de la Lightcycle
     ctx.beginPath();
-    ctx.moveTo(10, 0);       // Punta delantera
-    ctx.lineTo(-8, -5);     // Lateral izquierdo
-    ctx.lineTo(-12, -3);    // Rueda trasera izquierda
-    ctx.lineTo(-12, 3);     // Rueda trasera derecha
-    ctx.lineTo(-8, 5);      // Lateral derecho
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-8, -5);
+    ctx.lineTo(-12, -3);
+    ctx.lineTo(-12, 3);
+    ctx.lineTo(-8, 5);
     ctx.closePath();
     ctx.fill();
 
-    // Rueda delantera brillante
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(4, -2, 6, 4);
 
-    // Resplandor de Turbo
     if (turbo) {
       ctx.fillStyle = "#ffaa00";
       ctx.fillRect(-16, -3, 5, 6);
@@ -289,7 +283,6 @@
         vx: Math.cos(ang) * vel,
         vy: Math.sin(ang) * vel,
         vida: 0.8 + Math.random() * 0.4,
-        vidaMax: 1.2,
         color
       });
     }
@@ -316,7 +309,6 @@
 
   function renderHUD() {
     ctx.save();
-    // 1. Marcador de Rondas
     ctx.font = "bold 20px monospace";
     ctx.fillStyle = K.COL_P1;
     ctx.textAlign = "left";
@@ -326,23 +318,19 @@
     ctx.textAlign = "right";
     ctx.fillText(`P2 (MAGENTA): ${"◆ ".repeat(snap.p2)}`, K.W - 24, 34);
 
-    // 2. Barra de Turbo de cada jugador
     const tbP1 = snap.m1 ? snap.m1.tb : 0;
     const tbP2 = snap.m2 ? snap.m2.tb : 0;
 
-    // Barra P1 (Izquierda)
     ctx.fillStyle = "rgba(0, 240, 255, 0.15)";
     ctx.fillRect(24, 46, 160, 8);
     ctx.fillStyle = K.COL_P1;
     ctx.fillRect(24, 46, (tbP1 / 100) * 160, 8);
 
-    // Barra P2 (Derecha)
     ctx.fillStyle = "rgba(255, 0, 85, 0.15)";
     ctx.fillRect(K.W - 184, 46, 160, 8);
     ctx.fillStyle = K.COL_P2;
     ctx.fillRect(K.W - 184 + (1 - tbP2 / 100) * 160, 46, (tbP2 / 100) * 160, 8);
 
-    // Controles en el centro superior
     ctx.font = "12px monospace";
     ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
     ctx.textAlign = "center";
