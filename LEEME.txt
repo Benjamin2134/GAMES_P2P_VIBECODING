@@ -1,0 +1,49 @@
+PONG ONLINE (P2P) - un solo archivo, sin instalar nada
+======================================================
+
+QUE ES
+  pong.html es TODO el juego en un archivo (la libreria de red va embebida).
+  La conexion es directa PC-a-PC (WebRTC). No hay servidor de juego.
+  Lo unico que usa de afuera es un mini-servicio gratis para el "saludo"
+  inicial (intercambiar el codigo) y servidores STUN de Google.
+
+COMO JUGAR
+  1. Los DOS abren pong.html en el navegador (doble clic, o mejor: subilo a
+     un hosting y comparten el link - ver mas abajo). Sirve Chrome, Edge,
+     Safari (Mac), Firefox.
+  2. Vos: "Crear sala"  ->  te da un codigo de 4 letras (ej: NKRE).
+  3. Se lo pasas a tu amigo por WhatsApp.
+  4. Tu amigo: escribe el codigo en "Unirse".
+  5. Listo. Arranca solo. Vos sos el jugador 1 (izquierda), el jugador 2 (der).
+
+CONTROLES
+  W / S   o   flechas arriba / abajo.  Primero a 5 puntos gana. Hay boton de revancha.
+
+IMPORTANTE (limitaciones reales)
+  - El que "Crea la sala" es el que corre la simulacion. Tiene que dejar la
+    pestana VISIBLE; si la minimiza, el juego se ralentiza para los dos
+    (el navegador frena las pestanas de fondo). Volviendo a la pestana se
+    normaliza.
+  - En ~1 de cada 6 conexiones caseras el P2P directo no engancha (NAT duro /
+    CGNAT de algunos ISP). En ese caso arriba de la cancha vas a ver
+    "via relay" en gris, o directamente no conecta. Solucion: configurar un
+    TURN (ver abajo).
+  - Necesitan internet (obvio) y que el mini-servicio de saludo (0.peerjs.com)
+    este arriba. Si algun dia falla, se puede levantar uno propio.
+
+SI NO CONECTA -> agregar un TURN (relay)
+  Abri pong.html con un editor de texto y busca "ICE_SERVERS".
+  Descomenta las lineas turn: y pone tus datos. Opciones para conseguirlos:
+   a) Cuenta gratis en https://www.metered.ca/tools/openrelay/  (50 GB/mes)
+   b) Tu propio coturn en un servidor con IP publica.
+  Con eso cubris casi el 100% de los casos.
+
+DEJARLO CON LINK FIJO (recomendado para no pasar archivos)
+  Subi la carpeta a un hosting estatico gratis y comparten SIEMPRE el mismo link:
+   - GitHub Pages, Netlify (arrastrar la carpeta a netlify.com/drop),
+     Cloudflare Pages, itch.io...
+  Como es 1 solo archivo, literalmente subis pong.html y ya.
+
+ARCHIVOS
+  pong.html   el juego completo (incluye PeerJS 1.5.4 embebido)
+  LEEME.txt   esto
