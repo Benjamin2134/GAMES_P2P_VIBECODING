@@ -8,9 +8,9 @@ import vm from "vm";
 const SRC = dirname(fileURLToPath(import.meta.url));
 const rd = (f) => readFileSync(join(SRC, f), "utf8");
 
-const codigo = [rd("const.js"), rd("pong.sim.js"), rd("billar.sim.js"), rd("spacewar.sim.js")].join("\n") +
-  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim };";
-const sb = { performance: { now: () => Date.now() }, Math };
+const codigo = [rd("const.js"), rd("pong.sim.js"), rd("billar.sim.js"), rd("spacewar.sim.js"), rd("tron.sim.js")].join("\n") +
+  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim, TRON, TronSim };";
+const sb = { performance: { now: () => Date.now() }, Math, setTimeout: (fn) => fn() };
 vm.createContext(sb);
 new vm.Script(codigo).runInContext(sb);
 const A = sb.__api;
@@ -187,6 +187,52 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   s6.aplicarInputHost({ rot: 0, thrust: false, fire: false });
   for (let i = 0; i < 30; i++) s6.step(dt);
   t("spacewar: wrap-around horizontal", s6.naves[1].x >= 0 && s6.naves[1].x < A.SW.W);
+}
+
+// ================= TRON =================
+{
+  const tr = new A.TronSim();
+  t("tron: cuenta regresiva inicial", tr.sirviendo === true && tr.pausaRonda > 0);
+  t("tron: motos en posiciones iniciales opuestas", tr.motos[1].x === 160 && tr.motos[2].x === A.TRON.W - 160);
+
+  // Avanzar cuenta regresiva
+  for (let i = 0; i < 120 * 2; i++) tr.step(1 / 120);
+  t("tron: arranca movimiento tras cuenta", tr.sirviendo === false);
+
+  // Movimiento y avance
+  const x0 = tr.motos[1].x;
+  for (let i = 0; i < 30; i++) tr.step(1 / 120);
+  t("tron: moto 1 avanza hacia el este", tr.motos[1].x > x0);
+
+  // Giro ortogonal hacia el norte
+  tr.aplicarInputHost({ dir: "N", turbo: false });
+  tr.step(1 / 120);
+  t("tron: moto gira al norte", tr.motos[1].dir === "N");
+  t("tron: estela registra punto de giro", tr.estelas[1].length >= 2);
+
+  // Bloqueo de 180° (estando en N, intentar girar a S no tiene efecto)
+  tr.aplicarInputHost({ dir: "S", turbo: false });
+  tr.step(1 / 120);
+  t("tron: prohibido giro 180 sobre si mismo", tr.motos[1].dir === "N");
+
+  // Turbo incrementa velocidad
+  const trTurbo = new A.TronSim();
+  trTurbo.sirviendo = false;
+  trTurbo.aplicarInputHost({ dir: "E", turbo: true });
+  const xPre = trTurbo.motos[1].x;
+  for (let i = 0; i < 60; i++) trTurbo.step(1 / 120);
+  const avanceConTurbo = trTurbo.motos[1].x - xPre;
+  t("tron: turbo aumenta velocidad", avanceConTurbo > (A.TRON.VEL_BASE * 0.5));
+  t("tron: turbo gasta energia", trTurbo.motos[1].turboVal < A.TRON.TURBO_MAX);
+
+  // Colision con limites de arena destruye moto
+  const trBorde = new A.TronSim();
+  trBorde.sirviendo = false;
+  trBorde.motos[1].x = A.TRON.W - 5;
+  trBorde.motos[1].dir = "E";
+  for (let i = 0; i < 10; i++) trBorde.step(1 / 120);
+  t("tron: choque con borde destruye moto", !trBorde.motos[1].viva);
+  t("tron: destruccion da punto a moto rival", trBorde.puntos[2] === 1);
 }
 
 console.log(`\n${ok} OK, ${fail} FAIL`);
