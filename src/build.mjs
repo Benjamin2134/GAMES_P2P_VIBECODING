@@ -27,5 +27,8 @@ html = html
   .replace(/\r\n/g, "\n");
 
 const salida = join(RAIZ, "GAMESP2P.html");
+const indexSalida = join(RAIZ, "index.html");
 writeFileSync(salida, html);
+writeFileSync(indexSalida, html);
 console.log("OK  ->  " + salida + "  (" + html.length + " bytes)");
+console.log("OK  ->  " + indexSalida + " (GitHub Pages ready)");
