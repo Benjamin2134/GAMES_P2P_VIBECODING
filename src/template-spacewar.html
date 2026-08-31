@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>SPACEWAR 1979 · P2P</title>
+<style>
+  :root {
+    --bg-dark: #050805;
+    --green-phosphor: #39ff14;
+    --green-dim: #1d800a;
+    --amber-phosphor: #ffb000;
+    --text-main: #d0f0c0;
+    --text-muted: #628c62;
+    --border-color: #1a301a;
+    --font-mono: "Geist Mono", "Courier New", Courier, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 12px;
+    gap: 16px;
+  }
+  h1 { font-size: 1.2rem; letter-spacing: 4px; color: var(--green-phosphor); }
+  .panel {
+    background: #0c120c; border: 1px solid var(--border-color); border-radius: 8px;
+    padding: 20px; width: min(520px, 96vw); display: flex; flex-direction: column; gap: 14px;
+  }
+  .fila { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, button {
+    font-size: 1rem; padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border-color);
+    background: #091009; color: var(--text-main); font-family: inherit;
+  }
+  input { flex: 1; min-width: 140px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
+  button { cursor: pointer; font-weight: 700; text-transform: uppercase; }
+  button.primario { background: rgba(57, 255, 20, 0.15); border-color: var(--green-phosphor); color: var(--green-phosphor); }
+  button:hover:not(:disabled) { background: var(--green-phosphor); color: #000; }
+  .codigo {
+    font-size: 2.2rem; font-weight: 800; letter-spacing: 8px; text-align: center;
+    background: #040604; border: 1px dashed var(--green-dim); border-radius: 6px; padding: 16px;
+    color: var(--green-phosphor); user-select: all;
+  }
+  .sub { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; }
+  .oculto { display: none !important; }
+
+  .lienzo-wrap { position: relative; width: min(880px, 96vw); }
+  canvas {
+    width: 100%; height: auto; display: block; background: #030603;
+    border: 2px solid var(--border-color); border-radius: 8px;
+  }
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center;
+    background: rgba(5, 8, 5, 0.85); backdrop-filter: blur(2px); border-radius: 8px;
+  }
+  #overlayTexto { font-size: 1.8rem; font-weight: 800; color: var(--green-phosphor); }
+  #overlaySub { font-size: 0.95rem; color: var(--text-muted); }
+  kbd { background: #0d170d; border: 1px solid var(--green-dim); padding: 2px 6px; border-radius: 4px; color: var(--green-phosphor); }
+</style>
+</head>
+<body>
+
+<h1>SPACEWAR 1979 · P2P</h1>
+
+<!-- ========== MENU ========== -->
+<div id="seccionSala" class="panel">
+  <div class="fila"><button id="btnCrearSala" class="primario" style="flex:1">Crear Sala (P1)</button></div>
+  <div class="sub">Creas la sala espacial y le pasas el código a tu rival. Vos sos el Jugador 1 (Verde).</div>
+  <hr style="border-color: var(--border-color);" />
+  <div class="fila">
+    <input id="inputCodigo" placeholder="CÓDIGO" maxlength="12" />
+    <button id="btnUnirseSala">Unirse (P2)</button>
+  </div>
+  <div class="sub">Si tu amigo ya creó la sala, escribe su código para pilotear como Jugador 2 (Ámbar).</div>
+</div>
+
+<!-- ========== ESPERANDO (host) ========== -->
+<div id="seccionEsperando" class="panel oculto">
+  <div class="sub">Tu código de combate espacial — compártelo:</div>
+  <div id="codigoDisplay" class="codigo">····</div>
+  <div id="estadoHost" class="sub">Iniciando satélite P2P...</div>
+  <button id="btnCancelarHost">Cancelar</button>
+</div>
+
+<!-- ========== CONECTANDO (guest) ========== -->
+<div id="seccionConectando" class="panel oculto">
+  <div id="estadoGuest" class="sub">Estableciendo vector de aproximación...</div>
+  <button id="btnCancelarGuest">Cancelar</button>
+</div>
+
+<!-- ========== JUEGO ========== -->
+<div id="vistaJuego" class="oculto" style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+  <div class="lienzo-wrap">
+    <canvas id="cv" width="880" height="540"></canvas>
+    <div id="overlay" class="oculto">
+      <div id="overlayTexto"></div>
+      <div id="overlaySub"></div>
+      <button id="btnRevancha" class="primario">Revancha</button>
+    </div>
+  </div>
+  <div class="sub" style="text-align: center;">
+    Rotación: <kbd>A</kbd>/<kbd>D</kbd> o <kbd>←</kbd>/<kbd>→</kbd> · 
+    Empuje: <kbd>W</kbd> o <kbd>↑</kbd> · 
+    Disparo: <kbd>ESPACIO</kbd> · 
+    P1 (Host): Verde · P2 (Guest): Ámbar
+  </div>
+</div>
+
+<script>/*__PEERJS__*/</script>
+<script>/*__AUDIO__*/</script>
+<script>/*__GAME__*/</script>
+
+</body>
+</html>

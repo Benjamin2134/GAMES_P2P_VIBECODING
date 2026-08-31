@@ -1,0 +1,6 @@
+# Cursor AI Rules
+Before modifying or creating any code in this repository:
+1. Read and strictly follow `AGENTS.md`.
+2. Do NOT edit root `.html` files (`index.html`, `pong.html`, `spacewar.html`) directly.
+3. Always make modifications inside `src/`.
+4. Run `node src/test.mjs` and `node src/build.mjs` before committing.

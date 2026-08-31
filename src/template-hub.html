@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>ARCADE P2P · VIBECODING</title>
+<style>
+  :root {
+    --bg-dark: #050805;
+    --panel-bg: #0c120c;
+    --border-color: #1a301a;
+    --green-phosphor: #39ff14;
+    --green-dim: #1d800a;
+    --amber-phosphor: #ffb000;
+    --amber-dim: #8c6000;
+    --text-main: #d0f0c0;
+    --text-muted: #628c62;
+    --font-mono: "Geist Mono", "Courier New", Courier, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 12px;
+    gap: 14px;
+    background-image: radial-gradient(circle at 50% 30%, rgba(57, 255, 20, 0.03) 0%, transparent 70%);
+  }
+
+  /* Scanline effect */
+  body::after {
+    content: " ";
+    display: block;
+    position: fixed;
+    top: 0; left: 0; bottom: 0; right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+    background-size: 100% 4px;
+    z-index: 100;
+    pointer-events: none;
+    opacity: 0.6;
+  }
+
+  header {
+    width: min(920px, 96vw);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand h1 {
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 3px;
+    color: var(--green-phosphor);
+    text-shadow: 0 0 8px rgba(57, 255, 20, 0.4);
+  }
+  .badge-p2p {
+    font-size: 0.7rem;
+    background: rgba(57, 255, 20, 0.1);
+    color: var(--green-phosphor);
+    border: 1px solid var(--green-dim);
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  /* Panels */
+  .panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    width: min(540px, 96vw);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  }
+  .fila { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  /* Buttons & Inputs */
+  input, button {
+    font-size: 0.95rem;
+    padding: 10px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: #091009;
+    color: var(--text-main);
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+  input {
+    flex: 1;
+    min-width: 140px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    text-align: center;
+    border-color: var(--green-dim);
+  }
+  input:focus {
+    outline: none;
+    border-color: var(--green-phosphor);
+    box-shadow: 0 0 10px rgba(57, 255, 20, 0.2);
+  }
+  button {
+    cursor: pointer;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  button.primario {
+    background: rgba(57, 255, 20, 0.15);
+    border-color: var(--green-phosphor);
+    color: var(--green-phosphor);
+    text-shadow: 0 0 6px rgba(57, 255, 20, 0.4);
+  }
+  button.primario:hover:not(:disabled) {
+    background: var(--green-phosphor);
+    color: #000;
+    box-shadow: 0 0 14px rgba(57, 255, 20, 0.6);
+  }
+  button.secundario {
+    background: transparent;
+    border-color: var(--border-color);
+    color: var(--text-muted);
+  }
+  button.secundario:hover:not(:disabled) {
+    border-color: var(--text-main);
+    color: var(--text-main);
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .codigo-box {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: 8px;
+    text-align: center;
+    background: #040604;
+    border: 1px dashed var(--green-dim);
+    border-radius: 6px;
+    padding: 16px;
+    color: var(--green-phosphor);
+    text-shadow: 0 0 10px rgba(57, 255, 20, 0.5);
+    user-select: all;
+  }
+  .sub { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; }
+  .err { color: #ff5555; }
+  .ok { color: var(--green-phosphor); }
+  .oculto { display: none !important; }
+
+  /* ================= HUB / LOBBY ================= */
+  #hub {
+    width: min(920px, 96vw);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .hub-banner {
+    background: #091209;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .grid-juegos {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .tarjeta-juego {
+    background: #0a110a;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .tarjeta-juego:hover {
+    border-color: var(--green-phosphor);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(57, 255, 20, 0.1);
+  }
+  .tarjeta-juego.proximamente {
+    opacity: 0.5;
+    border-style: dashed;
+  }
+  .tarjeta-juego.proximamente:hover {
+    transform: none;
+    border-color: var(--border-color);
+    box-shadow: none;
+  }
+  .juego-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .juego-icono { font-size: 1.8rem; }
+  .juego-titulo { font-size: 1.1rem; font-weight: 800; color: var(--text-main); }
+  .juego-tag {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(57, 255, 20, 0.1);
+    color: var(--green-phosphor);
+    border: 1px solid var(--green-dim);
+  }
+
+  /* ================= JUEGO CANVAS ================= */
+  #vistaJuego {
+    width: min(920px, 96vw);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .barra-juego {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #091209;
+    border: 1px solid var(--border-color);
+    padding: 8px 14px;
+    border-radius: 6px;
+  }
+  .lienzo-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 880px;
+  }
+  canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    background: #030603;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.8), inset 0 0 40px rgba(0, 0, 0, 0.8);
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    background: rgba(5, 8, 5, 0.85);
+    backdrop-filter: blur(2px);
+    border-radius: 8px;
+  }
+  #overlayTexto {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: var(--green-phosphor);
+    text-shadow: 0 0 12px rgba(57, 255, 20, 0.8);
+  }
+  #overlaySub { font-size: 0.95rem; color: var(--text-muted); }
+  .ayuda-controles {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+  kbd {
+    background: #0d170d;
+    border: 1px solid var(--green-dim);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: inherit;
+    color: var(--green-phosphor);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>ARCADE P2P</h1>
+    <span class="badge-p2p">120Hz Netcode</span>
+  </div>
+  <div class="header-actions">
+    <button id="btnMute" class="secundario" style="padding: 6px 10px; font-size: 0.8rem;">🔊 SONIDO</button>
+    <div id="statusRed" style="font-size: 0.75rem; color: var(--text-muted);">DESCONECTADO</div>
+  </div>
+</header>
+
+<!-- ================= 1. PANTALLA DE SALA / CÓDIGO ================= -->
+<div id="seccionSala" class="panel">
+  <div style="font-weight: 800; color: var(--green-phosphor); letter-spacing: 1px;">SALA MULTIJUGADOR DIRECTA</div>
+  <div class="sub">Conexión WebRTC directa entre navegadores sin servidor intermediario de juego.</div>
+  
+  <div class="fila">
+    <button id="btnCrearSala" class="primario" style="flex:1">Crear Sala (Host)</button>
+  </div>
+  
+  <hr style="border-color: var(--border-color); margin: 4px 0;" />
+  
+  <div class="fila">
+    <input id="inputCodigo" placeholder="CÓDIGO" maxlength="12" />
+    <button id="btnUnirseSala">Unirse</button>
+  </div>
+  <div class="sub">Escribe el código de 4 letras compartido por tu rival para unirte como Jugador 2.</div>
+</div>
+
+<!-- ================= 1.B ESPERANDO / CONECTANDO ================= -->
+<div id="seccionEsperando" class="panel oculto">
+  <div class="sub">Comparte este código de sala con tu amigo:</div>
+  <div id="codigoDisplay" class="codigo-box">····</div>
+  <div id="estadoHost" class="sub">Iniciando túnel WebRTC...</div>
+  <button id="btnCancelarHost" class="secundario">Cancelar</button>
+</div>
+
+<div id="seccionConectando" class="panel oculto">
+  <div id="estadoGuest" class="sub">Enlazando con la sala...</div>
+  <button id="btnCancelarGuest" class="secundario">Cancelar</button>
+</div>
+
+<!-- ================= 2. HOME / LOBBY DE JUEGOS ================= -->
+<div id="hub" class="oculto">
+  <div class="hub-banner">
+    <div>
+      <div style="font-weight: 800; color: var(--green-phosphor);">SALA P2P ACTIVA: <span id="hubCodigo" style="color: #fff;">----</span></div>
+      <div id="hubRol" class="sub">Rol: Host (Jugador 1) · Latencia: <span id="hubPing">-- ms</span></div>
+    </div>
+    <button id="btnDesconectar" class="secundario" style="font-size: 0.75rem; padding: 6px 10px;">Desconectar</button>
+  </div>
+
+  <div class="grid-juegos">
+    <!-- Juego 1: SPACEWAR 1979 -->
+    <div class="tarjeta-juego">
+      <div class="juego-header">
+        <div class="juego-icono">🚀</div>
+        <span class="juego-tag">NUEVO · 120HZ</span>
+      </div>
+      <div>
+        <div class="juego-titulo">SPACEWAR 1979</div>
+        <div class="sub">Duelo espacial con inercia newtoniana, rotación, disparos balísticos y estética CRT de fósforo verde.</div>
+      </div>
+      <button id="btnLanzarSpacewar" class="primario">Lanzar Spacewar</button>
+    </div>
+
+    <!-- Juego 2: PONG CLASSIC -->
+    <div class="tarjeta-juego">
+      <div class="juego-header">
+        <div class="juego-icono">🏓</div>
+        <span class="juego-tag">CLÁSICO · 120HZ</span>
+      </div>
+      <div>
+        <div class="juego-titulo">PONG CLÁSICO</div>
+        <div class="sub">El duelo clásico de palas con snap binario ultraliviano (31 bytes), dead-reckoning y delay adaptativo.</div>
+      </div>
+      <button id="btnLanzarPong" class="primario">Lanzar Pong</button>
+    </div>
+
+    <!-- Juego 3: CYBER TRON -->
+    <div class="tarjeta-juego proximamente">
+      <div class="juego-header">
+        <div class="juego-icono">🏍️</div>
+        <span class="juego-tag" style="border-color: #555; color: #888;">EN DESARROLLO</span>
+      </div>
+      <div>
+        <div class="juego-titulo">CYBER TRON</div>
+        <div class="sub">Carrera y encierro de estelas de luz en arena 2D a alta velocidad.</div>
+      </div>
+      <button class="secundario" disabled>Próximamente</button>
+    </div>
+
+    <!-- Juego 4: TANK DUEL -->
+    <div class="tarjeta-juego proximamente">
+      <div class="juego-header">
+        <div class="juego-icono">🛡️</div>
+        <span class="juego-tag" style="border-color: #555; color: #888;">EN DESARROLLO</span>
+      </div>
+      <div>
+        <div class="juego-titulo">TANK DUEL</div>
+        <div class="sub">Duelo táctico de micro-tanques en laberinto con rebote balístico.</div>
+      </div>
+      <button class="secundario" disabled>Próximamente</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 3. ÁREA DE JUEGO ================= -->
+<div id="vistaJuego" class="oculto">
+  <div class="barra-juego">
+    <button id="btnVolverHub" class="secundario" style="font-size: 0.8rem; padding: 6px 10px;">⎋ Catálogo de Juegos</button>
+    <div id="tituloJuegoActivo" style="font-weight: 800; color: var(--green-phosphor); letter-spacing: 2px;">SPACEWAR 1979</div>
+    <div style="font-size: 0.8rem; color: var(--text-muted);">
+      <span id="linkPing">-- ms</span> · <kbd>H</kbd> HUD
+    </div>
+  </div>
+
+  <div class="lienzo-wrap">
+    <canvas id="cv" width="880" height="540"></canvas>
+    <div id="overlay" class="oculto">
+      <div id="overlayTexto">VICTORIA</div>
+      <div id="overlaySub">Jugador 1 domina la arena</div>
+      <div class="fila">
+        <button id="btnRevancha" class="primario">Revancha</button>
+        <button id="btnOverlayHub" class="secundario">Elegir otro juego</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ayudaControles" class="ayuda-controles">
+    <!-- Se actualiza dinámicamente según el juego activo -->
+  </div>
+</div>
+
+<!-- ================== PeerJS 1.5.4 (embebido por build.mjs) ================== -->
+<script>/*__PEERJS__*/</script>
+
+<!-- ================== Sintetizador de Audio Web Audio API ================== -->
+<script>/*__AUDIO__*/</script>
+
+<!-- ================== Motor y Juegos (unidos por build.mjs) ================== -->
+<script>/*__GAME__*/</script>
+
+</body>
+</html>
