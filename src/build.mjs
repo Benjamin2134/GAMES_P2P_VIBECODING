@@ -10,8 +10,8 @@ const rd = (f) => readFileSync(join(SRC, f), "utf8");
 
 const ORDEN = [
   "const.js", "audio.js",
-  "pong.sim.js", "billar.sim.js", "spacewar.sim.js",
-  "pong.js", "billar.js", "spacewar.js",
+  "pong.sim.js", "billar.sim.js", "spacewar.sim.js", "battleship.sim.js",
+  "pong.js", "billar.js", "spacewar.js", "battleship.js",
   "shell.js",
 ];
 const bundle = ORDEN.map(rd).join("\n\n");

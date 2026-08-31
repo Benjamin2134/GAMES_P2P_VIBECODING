@@ -8,8 +8,8 @@ import vm from "vm";
 const SRC = dirname(fileURLToPath(import.meta.url));
 const rd = (f) => readFileSync(join(SRC, f), "utf8");
 
-const codigo = [rd("const.js"), rd("pong.sim.js"), rd("billar.sim.js"), rd("spacewar.sim.js")].join("\n") +
-  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim };";
+const codigo = [rd("const.js"), rd("pong.sim.js"), rd("billar.sim.js"), rd("spacewar.sim.js"), rd("battleship.sim.js")].join("\n") +
+  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim, BATTLESHIP, BattleshipSim };";
 const sb = { performance: { now: () => Date.now() }, Math };
 vm.createContext(sb);
 new vm.Script(codigo).runInContext(sb);
@@ -187,6 +187,64 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   s6.aplicarInputHost({ rot: 0, thrust: false, fire: false });
   for (let i = 0; i < 30; i++) s6.step(dt);
   t("spacewar: wrap-around horizontal", s6.naves[1].x >= 0 && s6.naves[1].x < A.SW.W);
+}
+
+// ================= BATTLESHIP =================
+{
+  const bs = new A.BattleshipSim();
+  t("battleship: fase inicial colocacion", bs.fase === "colocacion");
+
+  // Generar flota aleatoria valida
+  const f1 = bs.generarFlotaAleatoria();
+  t("battleship: genera 5 barcos", f1.length === 5);
+  t("battleship: flota aleatoria valida", bs.validarFlota(f1));
+
+  const f2 = bs.generarFlotaAleatoria();
+  bs.confirmarFlota(1, f1);
+  t("battleship: J1 confirmado", bs.listos[1] === true && bs.fase === "colocacion");
+  bs.confirmarFlota(2, f2);
+  t("battleship: ambos confirmados pasan a combate", bs.fase === "combate" && bs.turno === 1);
+
+  // Disparo a agua
+  // Encontrar una casilla donde J2 NO tenga barcos
+  let aguaX = 0, aguaY = 0;
+  const ocupadasJ2 = new Set();
+  f2.forEach(b => {
+    for (let i = 0; i < b.tam; i++) {
+      const cx = b.horiz ? b.x + i : b.x;
+      const cy = b.horiz ? b.y : b.y + i;
+      ocupadasJ2.add(`${cx},${cy}`);
+    }
+  });
+
+  for (let y = 0; y < 10; y++) {
+    for (let x = 0; x < 10; x++) {
+      if (!ocupadasJ2.has(`${x},${y}`)) {
+        aguaX = x; aguaY = y; break;
+      }
+    }
+  }
+
+  const resAgua = bs.disparar(1, aguaX, aguaY);
+  t("battleship: tiro a agua correcto", resAgua.ok && resAgua.resultado === "agua");
+  t("battleship: tiro a agua cambia turno a J2", bs.turno === 2);
+
+  // J2 intenta disparar fuera de turno como J1 -> falla
+  const resInvalido = bs.disparar(1, 0, 0);
+  t("battleship: no permite disparar fuera de turno", !resInvalido.ok);
+
+  // J2 dispara a una casilla de barco de J1
+  const primerBarcoJ1 = f1[0];
+  const impactoX = primerBarcoJ1.x;
+  const impactoY = primerBarcoJ1.y;
+
+  const resImp = bs.disparar(2, impactoX, impactoY);
+  t("battleship: disparo a barco acierta impacto", resImp.ok && (resImp.resultado === "impacto" || resImp.resultado === "hundido"));
+  t("battleship: acierto mantiene turno de J2", bs.turno === 2);
+
+  // Snapshot respeta niebla de guerra para J1
+  const snap1 = bs.snapshot(1);
+  t("battleship: snapshot J1 oculta coordenadas no hundidas de J2", snap1.flotaRival[0].x === undefined);
 }
 
 console.log(`\n${ok} OK, ${fail} FAIL`);
