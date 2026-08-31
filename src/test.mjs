@@ -59,28 +59,58 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
     return true;
   })());
 
-  // un tiro fuerte: las bolas se mueven, se resuelve y vuelve a apuntar
+  // un tiro fuerte (rompe): las bolas se mueven, se resuelve y vuelve a apuntar
   b.fase = "apuntando"; b.turno = 1;
-  b.apuntar(1, 0, 1);
+  b.apuntar(1, 0, 1, 0, 0);
   b.tirar(1);
   t("billar: tras tirar -> simulando", b.fase === "simulando");
   let it = 0;
-  while (b.fase === "simulando" && it < 6000) { b.step(1 / 120); it++; }
-  t("billar: el tiro termina", b.fase !== "simulando");
+  while (b.fase === "simulando" && it < 9000) { b.step(1 / 120); it++; }
+  t("billar: el tiro termina (< ~6s sim)", b.fase !== "simulando" && it < 8000);
   t("billar: todas las bolas quedaron quietas", b.bolas.every((x) => !x.dentro || (x.vx === 0 && x.vy === 0)));
   t("billar: bolas dentro del paño", b.bolas.filter((x) => x.dentro).every((x) =>
-    x.x >= A.BILLAR.X0 - 0.6 && x.x <= A.BILLAR.X1 + 0.6 && x.y >= A.BILLAR.Y0 - 0.6 && x.y <= A.BILLAR.Y1 + 0.6));
+    x.x >= A.BILLAR.X0 - 1 && x.x <= A.BILLAR.X1 + 1 && x.y >= A.BILLAR.Y0 - 1 && x.y <= A.BILLAR.Y1 + 1));
 
-  // falta por no tocar nada
+  // FISICA: dos fases. Un tiro a boca de jarro debe patinar primero (u != 0) y
+  // despues rodar (v ~= R*w en el punto de contacto).
+  const ph = new A.BillarSim();
+  for (const bb of ph.bolas) if (bb.n !== 0) bb.dentro = false;   // sin obstaculos ni rieles en el trayecto
+  ph.fase = "simulando"; ph._b(0).x = 120; ph._b(0).y = 265;
+  ph._b(0).vx = 520; ph._b(0).vy = 0; ph._b(0).wx = 0; ph._b(0).wy = 0;
+  ph._sub(1 / 240);
+  const u0 = Math.hypot(ph._b(0).vx - A.BILLAR.R * ph._b(0).wy, ph._b(0).vy + A.BILLAR.R * ph._b(0).wx);
+  t("billar: al inicio patina (deslizamiento > 0)", u0 > 50);
+  for (let i = 0; i < 240 * 1.5; i++) ph._sub(1 / 240);
+  const c0 = ph._b(0);
+  const uN = Math.hypot(c0.vx - A.BILLAR.R * c0.wy, c0.vy + A.BILLAR.R * c0.wx);
+  t("billar: despues rueda (deslizamiento ~ 0)", uN < A.BILLAR.SLIP_EPS + 1 && Math.hypot(c0.vx, c0.vy) > 5 && c0.x < A.BILLAR.X1);
+
+  // EFECTO: draw (oy < 0) deja retroceso -> tras chocar de frente, la blanca vuelve
+  const dr = new A.BillarSim();
+  dr.fase = "apuntando"; dr.turno = 1;
+  dr._b(0).x = 300; dr._b(0).y = 265;
+  for (const bb of dr.bolas) if (bb.n !== 0) bb.dentro = false;
+  const obj = dr._b(1); obj.dentro = true; obj.x = 420; obj.y = 265;
+  dr.apuntar(1, 0, 0.6, 0, -1);   // full draw
+  dr.tirar(1);
+  let choco = false, cueVolvio = false;
+  for (let i = 0; i < 900 && dr.fase === "simulando"; i++) {
+    dr.step(1 / 120);
+    if (dr._prim === 1) choco = true;
+    if (choco && dr._b(0).dentro && dr._b(0).vx < -8) cueVolvio = true;
+  }
+  t("billar: draw -> la blanca retrocede tras el choque", choco && cueVolvio);
+
+  // falta por no tocar nada: tiro corto hacia una zona vacia sin troneras en linea
   const c = new A.BillarSim();
   c.fase = "apuntando"; c.turno = 1;
-  // apuntar hacia una banda vacia (hacia arriba) con poca fuerza -> no toca bolas
-  c._b(0).x = A.BILLAR.W / 2; c._b(0).y = A.BILLAR.H / 2;
-  c.apuntar(1, -Math.PI / 2, 0.25);
+  for (const bb of c.bolas) if (bb.n !== 0) bb.dentro = false;   // despejar la mesa
+  c._b(0).x = A.BILLAR.W / 2 + 30; c._b(0).y = A.BILLAR.H / 2;
+  c.apuntar(1, Math.PI * 0.75, 0.18, 0, 0);
   c.tirar(1);
   it = 0;
-  while (c.fase === "simulando" && it < 6000) { c.step(1 / 120); it++; }
-  t("billar: no tocar bola -> falta y bola en mano al rival", c.fase === "manoLibre" && c.turno === 2);
+  while (c.fase === "simulando" && it < 9000) { c.step(1 / 120); it++; }
+  t("billar: no tocar bola -> falta y bola en mano al rival", c.fase === "manoLibre" && c.turno === 2 && !c._cue);
 
   // manoLibre coloca la blanca
   c.manoLibre(2, A.BILLAR.W / 2, A.BILLAR.H / 2 + 40);

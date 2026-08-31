@@ -24,10 +24,26 @@ Juegos: **Pong**, **Billar (8-ball)** y **Spacewar 1979**. Con sonido retro
 
 ### Billar (8-ball)
 Por turnos. Apuntás con el **mouse**, **mantenés apretado** para cargar fuerza y
-**soltás para tirar** (o flechas + `espacio`). Si hacés falta, el rival pone la
-blanca donde quiera con un **click**. Gana quien mete la 8 legal después de
-limpiar su grupo (lisas o rayas). Reglas 8-ball simplificadas pero reales:
-grupos, faltas, bola en mano, scratch.
+**soltás para tirar** (o flechas + `espacio`). El **círculo blanco** abajo a la
+derecha es dónde le pegás a la bola: arriba = corrida (*follow*), abajo =
+retroceso (*draw*), a los costados = efecto lateral. Si hacés falta, el rival
+pone la blanca donde quiera con un **click**. Marcador arriba con las bolas que
+lleva cada uno. La línea de puntería es **corta y se desvanece**: da la
+dirección, no el punto de impacto.
+
+Gana quien mete la 8 legal después de limpiar su grupo (lisas o rayas). Reglas
+8-ball: grupos, asignación al primer pocket, faltas (scratch, primera bola mala,
+no tocar nada), bola en mano.
+
+**Física realista (2D):** movimiento en dos fases — la bola primero *patina*
+(fricción alta) y va tomando efecto hasta que *rueda* de forma natural
+(v = R·ω en el punto de contacto), y después rueda con resistencia baja; ese
+"patina y después agarra" es lo que se ve en una mesa real. Choque bola-bola
+con restitución 0.95 + fricción tangencial (*throw*); bandas con restitución
+dependiente de la velocidad + efecto; troneras con embudo. Follow / draw /
+efecto lateral salen de dónde le pegás a la blanca. Constantes basadas en la
+física real del pool (drdavepoolinfo.com, pooltool), con multiplicadores de
+juego para que las jugadas asienten en pocos segundos.
 
 ### Spacewar 1979
 Duelo de naves con inercia newtoniana. <kbd>←</kbd>/<kbd>→</kbd> giran,
