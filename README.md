@@ -1,69 +1,81 @@
-# GAMES_P2P_VIBECODING — PONG online
+# GAMES_P2P_VIBECODING
 
-Pong para 2 jugadores por internet, **sin instalar nada** y **sin servidor de juego**.
-La conexión es directa PC-a-PC con **WebRTC**; un mini-servicio gratis
-(`0.peerjs.com`) sólo sirve para intercambiar el código de sala.
+Colección de juegos para **2 jugadores por internet**, en **un solo archivo HTML**,
+**sin instalar nada** y **sin servidor de juego**. La conexión es directa PC-a-PC
+con **WebRTC**; un mini-servicio gratis (`0.peerjs.com`) sólo intercambia el
+código de sala.
+
+Juegos: **Pong** y **Billar (8-ball)**.
 
 ## Jugar
 
-Los dos abren `pong.html` en el navegador (Chrome/Edge/Firefox/Safari). Uno hace
-**Crear sala** → sale un código de 4 letras → se lo pasa al otro → el otro lo
-escribe en **Unirse**. Listo.
+1. Los dos abren **`GAMESP2P.html`** en el navegador (Chrome/Edge/Firefox/Safari).
+2. Uno elige un juego → **Crear sala** → sale un código de 4 letras.
+3. Se lo pasa al otro, que lo escribe en **Unirse** (no elige juego: se usa el que
+   eligió quien creó la sala).
+4. Listo.
 
-- Controles: `W`/`S` o flechas. `H` = HUD de red (FPS, RTT, jitter, bytes/s).
-- El que crea la sala es el **jugador 1** (izquierda) y su navegador corre la
-  simulación (física de la pelota).
-- Primero a 5 gana. Botón de revancha.
-- Si alguno cambia de pestaña / minimiza, el juego se **pausa** para los dos y
-  se reanuda al volver.
+- Si alguno cambia de pestaña / minimiza, se **pausa** para los dos.
+- Botón de revancha al terminar.
 
-Detalles y solución para cuando no conecta (NAT duro → TURN): ver `LEEME.txt`.
+### Pong
+`W`/`S` o flechas. Primero a 5.
 
-## Optimización de red (netcode)
+### Billar (8-ball)
+Por turnos. Apuntás con el **mouse**, **mantenés apretado** para cargar fuerza y
+**soltás para tirar** (o flechas + `espacio`). Si hacés falta, el rival pone la
+blanca donde quiera con un **click**. Gana quien mete la 8 legal después de
+limpiar su grupo (lisas o rayas). Reglas 8-ball simplificadas pero reales:
+grupos, faltas, bola en mano, scratch.
 
-Para que ambos jueguen fluido y sin lag perceptible:
+Cómo conectar desde otra casa cuando el P2P directo no engancha (NAT duro → TURN):
+ver `LEEME.txt`.
+
+## Optimización de red (Pong)
 
 | Técnica | Qué hace |
 |---|---|
-| **Paso fijo 120 Hz + acumulador** | La física va a 120 Hz constante y desacoplada del render; sin drift ni tunneling. |
-| **Snapshots binarios (31 bytes)** | Estado del juego en un `DataView` en vez de JSON: ~4× menos bytes y sin coste de `JSON.parse` 60 veces/s. |
-| **Canal no confiable + nº de secuencia** | El `DataChannel` va sin reintentos ni orden (como UDP): cero *head-of-line blocking*; los paquetes viejos/duplicados se descartan por secuencia. Cada snapshot es autónomo, así que una pérdida no se nota. |
-| **Autoridad de cliente sobre tu pala** | Tu pala responde en 0 ms (la simulás localmente) y le mandás la posición al host, que la acepta **limitada a lo físicamente posible** (anti-teleport / anti-cheat). |
-| **Interpolación con retardo adaptativo** | La pala rival se interpola entre snapshots con un retardo que se ajusta solo según el *jitter* medido (35–140 ms). Movimiento sin tirones aunque la red varíe. |
-| **Dead-reckoning de la pelota** | La pelota se dibuja en su posición proyectada (con rebote de paredes) y la corrección de error se disuelve suavemente (*projective velocity blending*): la pelota nunca "salta". |
-| **Render** | Canvas a `devicePixelRatio`, contexto `alpha:false` + `desynchronized:true`, coordenadas redondeadas. |
+| Paso fijo 120 Hz + acumulador | Física constante, desacoplada del render. |
+| Snapshots binarios (31 B) | Estado en `DataView`, no JSON. |
+| Canal no confiable + nº de secuencia | Sin head-of-line blocking; descarta paquetes viejos. |
+| Autoridad de cliente sobre tu pala | Tu pala responde en 0 ms; el host la acepta limitada a lo físicamente posible. |
+| Interpolación con retardo adaptativo | La pala rival se interpola con un retardo que se ajusta solo al jitter. |
+| Dead-reckoning de la pelota | Se dibuja proyectada; el error se disuelve suave. |
 
-`node src/test.mjs` corre los tests de la lógica pura (codec, física, límites).
+Billar es por turnos, así que usa snapshots JSON (la latencia fina no importa) con
+reenvío self-healing de las jugadas sobre el canal no confiable.
 
-## Estructura del repo
+## Estructura
 
 ```
-pong.html            <- EL JUEGO. Archivo único autocontenido (generado). Es el que se juega/hostea.
+GAMESP2P.html        <- EL JUEGO. Archivo único autocontenido (GENERADO).
 LEEME.txt            <- instrucciones para jugadores + cómo agregar TURN
 src/
-  const.js           <- constantes (campo, palas, velocidades en px/seg, SIM_HZ…)
-  sim.js             <- class Partida: simulación autoritativa por dt (corre en el host)
-  app.js             <- menú, transporte P2P (codec binario), netcode y render
-  template.html      <- HTML + CSS con los marcadores /*__PEERJS__*/ y /*__GAME__*/
+  const.js           <- comunes (clamp, lerp, registro JUEGOS)
+  shell.js           <- selector de juego + transporte P2P + loop maestro
+  pong.sim.js  pong.js     <- Pong: simulación + módulo (netcode, render)
+  billar.sim.js  billar.js <- Billar: simulación 8-ball + módulo (input, render)
+  template.html      <- HTML + CSS con /*__PEERJS__*/ y /*__BUNDLE__*/
   peerjs.min.js      <- PeerJS 1.5.4 vendorizado
-  build.mjs          <- ensambla todo -> pong.html
+  build.mjs          <- ensambla -> GAMESP2P.html
   test.mjs           <- tests de la lógica pura (node src/test.mjs)
 ```
 
+Un juego = un objeto en `JUEGOS.xxx` con:
+`nombre, desc, canvas:{w,h}, iniciarHost(), iniciarGuest(), destruir(),
+onData(msg), frame(now, dt, pausado), overlay(), revancha()`.
+El shell le pasa los globales `cv`, `ctx`, `net` (`{rol, enviar}`).
+
 ## Editar / compilar
 
-1. Tocás lo que quieras en `src/` (lo normal es `sim.js` para reglas de juego,
-   `app.js` para UI/red, `const.js` para números).
-2. Regenerás el archivo jugable:
-
 ```bash
-node src/build.mjs
+node src/build.mjs     # regenera GAMESP2P.html
+node src/test.mjs      # tests de física y reglas
 ```
 
-3. Commit de **`src/` y `pong.html` juntos** (el `pong.html` va commiteado para
-   que jugadores y hosting no necesiten Node).
+Commiteá `src/` y `GAMESP2P.html` juntos (jugadores/hosting no necesitan Node).
 
 ## Publicar con link fijo
 
-Subí `pong.html` a cualquier hosting estático (Netlify Drop, GitHub Pages,
+Subí `GAMESP2P.html` a cualquier hosting estático (Netlify Drop, GitHub Pages,
 Cloudflare Pages). Es un solo archivo.

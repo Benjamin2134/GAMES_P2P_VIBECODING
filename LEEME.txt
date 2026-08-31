@@ -1,59 +1,47 @@
-PONG ONLINE (P2P) - un solo archivo, sin instalar nada
-======================================================
+GAMES P2P - un solo archivo, sin instalar nada, para 2 jugadores
+================================================================
 
 QUE ES
-  pong.html es TODO el juego en un archivo (la libreria de red va embebida).
-  La conexion es directa PC-a-PC (WebRTC). No hay servidor de juego.
-  Lo unico que usa de afuera es un mini-servicio gratis para el "saludo"
-  inicial (intercambiar el codigo) y servidores STUN de Google.
+  GAMESP2P.html es TODO (Pong + Billar 8-ball) en un archivo, con la libreria
+  de red embebida. La conexion es directa PC-a-PC (WebRTC). No hay servidor de
+  juego. Lo unico de afuera es un mini-servicio gratis para el "saludo" inicial
+  (intercambiar el codigo) y servidores STUN de Google.
 
 COMO JUGAR
-  1. Los DOS abren pong.html en el navegador (doble clic, o mejor: subilo a
-     un hosting y comparten el link - ver mas abajo). Sirve Chrome, Edge,
-     Safari (Mac), Firefox.
-  2. Vos: "Crear sala"  ->  te da un codigo de 4 letras (ej: NKRE).
-  3. Se lo pasas a tu amigo por WhatsApp.
-  4. Tu amigo: escribe el codigo en "Unirse".
-  5. Listo. Arranca solo. Vos sos el jugador 1 (izquierda), el jugador 2 (der).
+  1. Los DOS abren GAMESP2P.html en el navegador (doble clic, o mejor: subilo a
+     un hosting y comparten el link - ver mas abajo). Chrome, Edge, Safari, Firefox.
+  2. Vos: elegis un juego -> "Crear sala" -> te da un codigo de 4 letras.
+  3. Se lo pasas a tu amigo (mail / Google Drive; WhatsApp a veces bloquea .html).
+  4. Tu amigo: escribe el codigo en "Unirse" (no elige juego: se usa el tuyo).
+  5. Listo. Arranca solo.
 
 CONTROLES
-  W / S   o   flechas arriba / abajo.  Primero a 5 puntos gana. Hay boton de revancha.
-  Tecla H = muestra/oculta el HUD de red (FPS, RTT, jitter, KB/s, directo o relay).
+  Pong:   W / S  o  flechas.  Primero a 5.
+  Billar: apuntas con el MOUSE, MANTENES APRETADO para cargar la fuerza y
+          SOLTAS para tirar (o flechas + espacio). Por turnos. Si haces falta,
+          el rival pone la blanca donde quiera con un click. Gana quien mete la
+          8 legal despues de limpiar su grupo (lisas o rayas).
 
-RENDIMIENTO
-  El juego usa netcode de verdad: fisica a 120 Hz, estado en binario, canal sin
-  reintentos (baja latencia), tu pala responde al instante (autoridad de cliente)
-  y la pelota / la pala rival se predicen para que no se vean tirones.
-  Detalles en README.md.
-
-IMPORTANTE (limitaciones reales)
-  - El que "Crea la sala" es el que corre la simulacion. Si cualquiera de los
-    dos cambia de pestana o minimiza, el juego se PAUSA para ambos (aparece
-    "Pausa") y sigue solo al volver. O sea: no se pierde, pero hay que volver
-    a la pestana para jugar.
+LIMITACIONES REALES
+  - El que "Crea la sala" corre la simulacion. Si cualquiera cambia de pestana
+    o minimiza, el juego se PAUSA para ambos y sigue al volver (no se pierde).
   - En ~1 de cada 6 conexiones caseras el P2P directo no engancha (NAT duro /
-    CGNAT de algunos ISP). En ese caso arriba de la cancha vas a ver
-    "via relay" en gris, o directamente no conecta. Solucion: configurar un
-    TURN (ver abajo).
-  - Necesitan internet (obvio) y que el mini-servicio de saludo (0.peerjs.com)
-    este arriba. Si algun dia falla, se puede levantar uno propio.
+    CGNAT de algunos ISP). Solucion: configurar un TURN (abajo).
+  - Necesitan internet y que 0.peerjs.com este arriba.
 
 SI NO CONECTA -> agregar un TURN (relay)
-  Abri pong.html con un editor de texto y busca "ICE_SERVERS".
-  Descomenta las lineas turn: y pone tus datos. Opciones para conseguirlos:
+  Abri GAMESP2P.html (o src/shell.js) con un editor y busca "ICE_SERVERS".
+  Descomenta las lineas turn: y pone tus datos:
    a) Cuenta gratis en https://www.metered.ca/tools/openrelay/  (50 GB/mes)
    b) Tu propio coturn en un servidor con IP publica.
-  Con eso cubris casi el 100% de los casos.
 
-DEJARLO CON LINK FIJO (recomendado para no pasar archivos)
-  Subi la carpeta a un hosting estatico gratis y comparten SIEMPRE el mismo link:
-   - GitHub Pages, Netlify (arrastrar la carpeta a netlify.com/drop),
-     Cloudflare Pages, itch.io...
-  Como es 1 solo archivo, literalmente subis pong.html y ya.
+LINK FIJO (para no pasar el archivo cada vez)
+  Subi GAMESP2P.html a un hosting estatico gratis (Netlify Drop, GitHub Pages,
+  Cloudflare Pages) y comparten SIEMPRE el mismo link. Es 1 solo archivo.
 
 ARCHIVOS
-  pong.html   el juego completo (incluye PeerJS 1.5.4 embebido) -- GENERADO
-  LEEME.txt   esto
-  README.md   info para desarrollar
-  src/        codigo fuente. Para editar: tocar src/*.js y correr
-              "node src/build.mjs" para regenerar pong.html
+  GAMESP2P.html  el juego completo (PeerJS 1.5.4 embebido) -- GENERADO
+  README.md      info para desarrollar
+  src/           codigo fuente. Para editar: tocar src/*.js y correr
+                 "node src/build.mjs" para regenerar GAMESP2P.html
+                 ("node src/test.mjs" corre los tests de fisica/reglas)
