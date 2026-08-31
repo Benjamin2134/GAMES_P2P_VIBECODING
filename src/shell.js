@@ -35,6 +35,15 @@ const net = {
   enviar(x) { try { if (conn && conn.open) conn.send(x); } catch (e) {} },
 };
 
+// audio: arranca con el primer gesto del usuario (politica de autoplay)
+function _iniAudio() {
+  try { RetroAudio.init(); } catch (e) {}
+  window.removeEventListener("pointerdown", _iniAudio);
+  window.removeEventListener("keydown", _iniAudio);
+}
+window.addEventListener("pointerdown", _iniAudio);
+window.addEventListener("keydown", _iniAudio);
+
 function azar4() {
   let s = "";
   for (let i = 0; i < 4; i++) s += ALFABETO[Math.floor(Math.random() * ALFABETO.length)];
@@ -195,6 +204,9 @@ $("btnCancelar").onclick = volverAlMenu;
 $("btnCancelar2").onclick = volverAlMenu;
 $("btnMenu").onclick = volverAlMenu;
 $("btnRevancha").onclick = () => { if (juego && juego.revancha) juego.revancha(); _fw = ""; };
+$("btnMute").onclick = () => {
+  try { RetroAudio.init(); $("btnMute").textContent = RetroAudio.toggleMute() ? "🔇" : "🔊"; } catch (e) {}
+};
 
 // ---------- selector ----------
 function pintarSelector() {

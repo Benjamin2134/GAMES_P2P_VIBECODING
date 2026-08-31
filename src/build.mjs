@@ -8,7 +8,12 @@ const SRC = dirname(fileURLToPath(import.meta.url));
 const RAIZ = join(SRC, "..");
 const rd = (f) => readFileSync(join(SRC, f), "utf8");
 
-const ORDEN = ["const.js", "pong.sim.js", "billar.sim.js", "pong.js", "billar.js", "shell.js"];
+const ORDEN = [
+  "const.js", "audio.js",
+  "pong.sim.js", "billar.sim.js", "spacewar.sim.js",
+  "pong.js", "billar.js", "spacewar.js",
+  "shell.js",
+];
 const bundle = ORDEN.map(rd).join("\n\n");
 const peerjs = rd("peerjs.min.js");
 

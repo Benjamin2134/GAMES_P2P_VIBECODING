@@ -43,6 +43,9 @@
   #lienzoWrap { position: relative; width: min(820px, 96vw); }
   canvas { width: 100%; height: auto; display: block; background: #05070b;
     border: 2px solid #262b36; border-radius: 10px; touch-action: none; }
+  #btnMute { position: absolute; top: 8px; right: 8px; padding: 4px 8px; font-size: .95rem;
+    background: rgba(10,12,18,.55); border-color: #2a3040; line-height: 1; opacity: .5; }
+  #btnMute:hover { opacity: 1; }
   #overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 12px; text-align: center; pointer-events: none; }
   #overlayTexto { font-size: 1.5rem; font-weight: 800; text-shadow: 0 2px 14px #000; }
@@ -87,6 +90,7 @@
 <div id="juego" class="oculto" style="display:flex; flex-direction:column; align-items:center; gap:12px;">
   <div id="lienzoWrap">
     <canvas id="cv" width="820" height="480"></canvas>
+    <button id="btnMute" title="Sonido">🔊</button>
     <div id="overlay" class="oculto">
       <div id="overlayTexto"></div>
       <div id="overlaySub"></div>
@@ -97,7 +101,8 @@
   <div class="ayuda">
     <b>Pong:</b> <kbd>W</kbd>/<kbd>S</kbd> o flechas. &nbsp;·&nbsp;
     <b>Billar:</b> apuntá con el mouse, mantené apretado para la fuerza, soltá para tirar
-    (o flechas + <kbd>espacio</kbd>). En falta, click para poner la blanca.
+    (o flechas + <kbd>espacio</kbd>); en falta, click para poner la blanca. &nbsp;·&nbsp;
+    <b>Spacewar:</b> <kbd>←</kbd>/<kbd>→</kbd> girar, <kbd>↑</kbd> empuje, <kbd>espacio</kbd> disparar.
   </div>
 </div>
 

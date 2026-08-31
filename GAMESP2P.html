@@ -43,6 +43,9 @@
   #lienzoWrap { position: relative; width: min(820px, 96vw); }
   canvas { width: 100%; height: auto; display: block; background: #05070b;
     border: 2px solid #262b36; border-radius: 10px; touch-action: none; }
+  #btnMute { position: absolute; top: 8px; right: 8px; padding: 4px 8px; font-size: .95rem;
+    background: rgba(10,12,18,.55); border-color: #2a3040; line-height: 1; opacity: .5; }
+  #btnMute:hover { opacity: 1; }
   #overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 12px; text-align: center; pointer-events: none; }
   #overlayTexto { font-size: 1.5rem; font-weight: 800; text-shadow: 0 2px 14px #000; }
@@ -87,6 +90,7 @@
 <div id="juego" class="oculto" style="display:flex; flex-direction:column; align-items:center; gap:12px;">
   <div id="lienzoWrap">
     <canvas id="cv" width="820" height="480"></canvas>
+    <button id="btnMute" title="Sonido">🔊</button>
     <div id="overlay" class="oculto">
       <div id="overlayTexto"></div>
       <div id="overlaySub"></div>
@@ -97,7 +101,8 @@
   <div class="ayuda">
     <b>Pong:</b> <kbd>W</kbd>/<kbd>S</kbd> o flechas. &nbsp;·&nbsp;
     <b>Billar:</b> apuntá con el mouse, mantené apretado para la fuerza, soltá para tirar
-    (o flechas + <kbd>espacio</kbd>). En falta, click para poner la blanca.
+    (o flechas + <kbd>espacio</kbd>); en falta, click para poner la blanca. &nbsp;·&nbsp;
+    <b>Spacewar:</b> <kbd>←</kbd>/<kbd>→</kbd> girar, <kbd>↑</kbd> empuje, <kbd>espacio</kbd> disparar.
   </div>
 </div>
 
@@ -121,6 +126,198 @@ const lerp = (a, b, t) => a + (b - a) * t;
 
 // Registro de juegos. Cada modulo hace  JUEGOS.xxx = { ... }
 const JUEGOS = {};
+
+
+// ==========================================================================
+//  Sintetizador Web Audio API puro (Cero dependencias ni archivos externos).
+//  Sonidos vectoriales arcade clásicos (1979 - 1983).
+// ==========================================================================
+
+const RetroAudio = (() => {
+  let ctx = null;
+  let silenciado = false;
+
+  function init() {
+    if (!ctx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) ctx = new AudioCtx();
+    }
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume();
+    }
+  }
+
+  function toggleMute() {
+    silenciado = !silenciado;
+    return silenciado;
+  }
+
+  function isMuted() {
+    return silenciado;
+  }
+
+  // 1. Disparo Láser (Frecuencia en caída rápida)
+  function playLaser() {
+    if (silenciado || !ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.13);
+    } catch (e) {}
+  }
+
+  // 2. Empuje / Thrust (Ruido blanco modulado)
+  let thrustNode = null, thrustGain = null;
+  function startThrust() {
+    if (silenciado || !ctx || thrustNode) return;
+    try {
+      const bufferSize = ctx.sampleRate * 0.5;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+
+      thrustNode = ctx.createBufferSource();
+      thrustNode.buffer = buffer;
+      thrustNode.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(220, ctx.currentTime);
+
+      thrustGain = ctx.createGain();
+      thrustGain.gain.setValueAtTime(0.08, ctx.currentTime);
+
+      thrustNode.connect(filter);
+      filter.connect(thrustGain);
+      thrustGain.connect(ctx.destination);
+
+      thrustNode.start();
+    } catch (e) {}
+  }
+
+  function stopThrust() {
+    if (thrustNode) {
+      try {
+        thrustGain.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
+        setTimeout(() => {
+          if (thrustNode) {
+            thrustNode.stop();
+            thrustNode.disconnect();
+            thrustNode = null;
+            thrustGain = null;
+          }
+        }, 50);
+      } catch (e) {
+        thrustNode = null;
+      }
+    }
+  }
+
+  // 3. Explosión Vectorial (Ruido filtrado con caída exponencial)
+  function playExplosion() {
+    if (silenciado || !ctx) return;
+    try {
+      const bufferSize = ctx.sampleRate * 0.6;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(600, ctx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.5);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      noise.start();
+    } catch (e) {}
+  }
+
+  // 4. Rebote de Pong / Beep
+  function playPongBeep(alto = false) {
+    if (silenciado || !ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+
+      osc.type = "square";
+      osc.frequency.setValueAtTime(alto ? 660 : 440, now);
+
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.07);
+    } catch (e) {}
+  }
+
+  // 5. Victoria / Fanfarria
+  function playWin() {
+    if (silenciado || !ctx) return;
+    try {
+      const notas = [261.63, 329.63, 392.00, 523.25]; // Do, Mi, Sol, Do
+      notas.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = ctx.currentTime + idx * 0.1;
+
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, start);
+
+        gain.gain.setValueAtTime(0.2, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.25);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(start);
+        osc.stop(start + 0.26);
+      });
+    } catch (e) {}
+  }
+
+  return {
+    init,
+    toggleMute,
+    isMuted,
+    playLaser,
+    startThrust,
+    stopThrust,
+    playExplosion,
+    playPongBeep,
+    playWin
+  };
+})();
 
 
 // ==========================================================================
@@ -450,6 +647,155 @@ class BillarSim {
       rev1: this.revancha[1], rev2: this.revancha[2],
       aim: this.fase === "apuntando" ? { ang: this.aim.ang, pot: this.aim.pot, por: this.turno } : null,
       quieto: this.fase !== "simulando",
+    };
+  }
+}
+
+
+// ==========================================================================
+//  Simulacion autoritativa de SPACEWAR 1979 (corre en el host, paso fijo).
+//  Fisica newtoniana pura: inercia, rotacion, empuje, wrap-around, balas.
+//  Base: PR de @777.dub (feature/arcade-hub-spacewar), adaptada al shell.
+// ==========================================================================
+const SW = {
+  W: 880, H: 540,
+  NAVE_R: 14, ROT_VEL: 4.2, THRUST: 380, VEL_MAX: 420,
+  FRICC: 0.992,           // decay por paso de 1/120 s (inercia casi total)
+  BALA_VEL: 560, BALA_VIDA: 1.4, BALA_CD: 0.22, BALA_R: 3, MAX_BALAS: 6,
+  VIDAS: 5, INVULN: 2.0, RESPAWN: 0.9,
+  SIM_HZ: 120, SEND_HZ: 40,
+  COL_P1: "#39ff14", COL_P2: "#ffb000",
+};
+
+class SpacewarSim {
+  constructor() { this.reiniciarTodo(); this.seq = 0; }
+
+  reiniciarTodo() {
+    this.naves = {
+      1: this._nave(SW.W * 0.2, SW.H * 0.5, 0),
+      2: this._nave(SW.W * 0.8, SW.H * 0.5, Math.PI),
+    };
+    this.balas = [];
+    this.puntos = { 1: 0, 2: 0 };
+    this.vidas = { 1: SW.VIDAS, 2: SW.VIDAS };
+    this.revancha = { 1: false, 2: false };
+    this.ganador = 0;
+    this.cooldowns = { 1: 0, 2: 0 };
+    this.respawnEn = { 1: 0, 2: 0 };
+    this.inputs = { 1: { rot: 0, thrust: false, fire: false }, 2: { rot: 0, thrust: false, fire: false } };
+    this.expl = [];
+  }
+  _nave(x, y, ang) { return { x, y, vx: 0, vy: 0, ang, thrust: false, invuln: SW.INVULN, viva: true }; }
+  _respawn(id) {
+    const x = id === 1 ? SW.W * 0.2 : SW.W * 0.8;
+    this.naves[id] = this._nave(x, SW.H * 0.5, id === 1 ? 0 : Math.PI);
+  }
+
+  aplicarInputHost(i) { this._in(1, i); }
+  aplicarInputGuest(i) { this._in(2, i); }
+  _in(id, i) {
+    const s = this.inputs[id];
+    s.rot = i.rot === -1 ? -1 : (i.rot === 1 ? 1 : 0);
+    s.thrust = !!i.thrust;
+    s.fire = !!i.fire;
+  }
+
+  pedirRevancha(n) {
+    if (!this.ganador) return;
+    this.revancha[n] = true;
+    if (this.revancha[1] && this.revancha[2]) this.reiniciarTodo();
+  }
+
+  step(dt) {
+    if (this.ganador) return;
+
+    for (let id = 1; id <= 2; id++) {
+      if (this.respawnEn[id] > 0) {
+        this.respawnEn[id] -= dt;
+        if (this.respawnEn[id] <= 0) this._respawn(id);
+        continue;
+      }
+      const n = this.naves[id], inp = this.inputs[id];
+      if (!n.viva) continue;
+      if (n.invuln > 0) n.invuln = Math.max(0, n.invuln - dt);
+
+      n.ang = (n.ang + inp.rot * SW.ROT_VEL * dt + Math.PI * 2) % (Math.PI * 2);
+      n.thrust = inp.thrust;
+      if (n.thrust) {
+        n.vx += Math.cos(n.ang) * SW.THRUST * dt;
+        n.vy += Math.sin(n.ang) * SW.THRUST * dt;
+        const sp = Math.hypot(n.vx, n.vy);
+        if (sp > SW.VEL_MAX) { n.vx = n.vx / sp * SW.VEL_MAX; n.vy = n.vy / sp * SW.VEL_MAX; }
+      }
+      const f = Math.pow(SW.FRICC, dt * 120);
+      n.vx *= f; n.vy *= f;
+      n.x += n.vx * dt; n.y += n.vy * dt;
+      n.x = (n.x + SW.W) % SW.W; n.y = (n.y + SW.H) % SW.H;
+
+      this.cooldowns[id] = Math.max(0, this.cooldowns[id] - dt);
+      if (inp.fire && this.cooldowns[id] <= 0 && this.balas.filter((b) => b.d === id).length < SW.MAX_BALAS) {
+        const px = n.x + Math.cos(n.ang) * (SW.NAVE_R + 4);
+        const py = n.y + Math.sin(n.ang) * (SW.NAVE_R + 4);
+        this.balas.push({
+          x: px, y: py,
+          vx: n.vx * 0.4 + Math.cos(n.ang) * SW.BALA_VEL,
+          vy: n.vy * 0.4 + Math.sin(n.ang) * SW.BALA_VEL,
+          d: id, vida: SW.BALA_VIDA, nueva: true,
+        });
+        this.cooldowns[id] = SW.BALA_CD;
+      }
+    }
+
+    for (let i = this.balas.length - 1; i >= 0; i--) {
+      const b = this.balas[i];
+      b.vida -= dt;
+      if (b.vida <= 0) { this.balas.splice(i, 1); continue; }
+      b.x = (b.x + b.vx * dt + SW.W) % SW.W;
+      b.y = (b.y + b.vy * dt + SW.H) % SW.H;
+      const rid = b.d === 1 ? 2 : 1;
+      const r = this.naves[rid];
+      if (r.viva && r.invuln <= 0 && this.respawnEn[rid] <= 0 &&
+          Math.hypot(b.x - r.x, b.y - r.y) < SW.NAVE_R + SW.BALA_R) {
+        this.balas.splice(i, 1);
+        this._impacto(rid, b.d);
+      }
+    }
+
+    const a = this.naves[1], c = this.naves[2];
+    if (a.viva && c.viva && a.invuln <= 0 && c.invuln <= 0 &&
+        this.respawnEn[1] <= 0 && this.respawnEn[2] <= 0 &&
+        Math.hypot(a.x - c.x, a.y - c.y) < SW.NAVE_R * 2) {
+      this._impacto(1, 2); this._impacto(2, 1);
+    }
+  }
+
+  _impacto(victima, agresor) {
+    const n = this.naves[victima];
+    this.vidas[victima]--;
+    n.viva = false;
+    this.expl.push({ x: n.x, y: n.y, c: victima === 1 ? SW.COL_P1 : SW.COL_P2 });
+    if (this.vidas[victima] <= 0) { this.puntos[agresor]++; this.ganador = agresor; }
+    else this.respawnEn[victima] = SW.RESPAWN;
+  }
+
+  snapshot() {
+    this.seq = (this.seq + 1) & 0xffff;
+    const nv = (n, id) => ({
+      x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10,
+      vx: Math.round(n.vx), vy: Math.round(n.vy),
+      ang: Math.round(n.ang * 1000) / 1000,
+      th: n.thrust, iv: n.invuln > 0, vv: n.viva && this.respawnEn[id] <= 0,
+      vd: this.vidas[id],
+    });
+    const expl = this.expl; this.expl = [];
+    return {
+      t: "e", seq: this.seq,
+      n1: nv(this.naves[1], 1), n2: nv(this.naves[2], 2),
+      b: this.balas.slice(0, 14).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.d]),
+      p1: this.puntos[1], p2: this.puntos[2],
+      ganador: this.ganador,
+      rev1: this.revancha[1], rev2: this.revancha[2],
+      expl: expl.length ? expl : null,
     };
   }
 }
@@ -993,6 +1339,263 @@ class BillarSim {
 
 
 // ==========================================================================
+//  Modulo de juego: SPACEWAR 1979  (JUEGOS.spacewar)
+//  Base: PR de @777.dub. Adaptado al shell: loop por rAF (frame), prediccion
+//  de tu propia nave, interpolacion de la rival, dead-reckoning de balas,
+//  sonido con RetroAudio. Usa los globales del shell: cv, ctx, net.
+// ==========================================================================
+(function () {
+  let sim = null;                     // host
+  let hAcc = 0, hSend = 0, hLast = 0;
+  let snap = null, snapStamp = 0;     // guest
+  const ent = { rot: 0, izq: false, der: false, thrust: false, fire: false };
+  let laserPrev = false, thrustPrev = false, ganadorPrev = 0;
+
+  const G = {
+    predN2: null,                     // prediccion de tu nave (guest = jugador 2)
+    vistaN1: null,                    // interpolacion de la nave rival
+  };
+  const particulas = [];
+
+  // ---------- teclado ----------
+  function tecla(e, v) {
+    const k = e.key.toLowerCase();
+    if (k === "arrowleft" || k === "a") ent.izq = v;
+    else if (k === "arrowright" || k === "d") ent.der = v;
+    else if (k === "arrowup" || k === "w") ent.thrust = v;
+    else if (k === " " || k === "spacebar") { ent.fire = v; e.preventDefault(); }
+    else return;
+    ent.rot = (ent.der ? 1 : 0) - (ent.izq ? 1 : 0);
+    if (k.startsWith("arrow")) e.preventDefault();
+  }
+  const kd = (e) => tecla(e, true), ku = (e) => tecla(e, false);
+  const blur = () => { ent.izq = ent.der = ent.thrust = ent.fire = false; ent.rot = 0; RetroAudio.stopThrust(); };
+  function enganchar() { addEventListener("keydown", kd); addEventListener("keyup", ku); addEventListener("blur", blur); }
+  function soltar() { removeEventListener("keydown", kd); removeEventListener("keyup", ku); removeEventListener("blur", blur); RetroAudio.stopThrust(); }
+
+  // ---------- fisica local (para predecir tu nave) ----------
+  function integrarNave(n, inp, dt) {
+    n.ang = (n.ang + inp.rot * SW.ROT_VEL * dt + Math.PI * 2) % (Math.PI * 2);
+    if (inp.thrust) {
+      n.vx += Math.cos(n.ang) * SW.THRUST * dt;
+      n.vy += Math.sin(n.ang) * SW.THRUST * dt;
+      const sp = Math.hypot(n.vx, n.vy);
+      if (sp > SW.VEL_MAX) { n.vx = n.vx / sp * SW.VEL_MAX; n.vy = n.vy / sp * SW.VEL_MAX; }
+    }
+    const f = Math.pow(SW.FRICC, dt * 120);
+    n.vx *= f; n.vy *= f;
+    n.x = (n.x + n.vx * dt + SW.W) % SW.W;
+    n.y = (n.y + n.vy * dt + SW.H) % SW.H;
+  }
+  const angLerp = (a, b, t) => {
+    let d = ((b - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    return a + d * t;
+  };
+  const wrapDelta = (a, b, tam) => {
+    let d = b - a;
+    if (d > tam / 2) d -= tam; else if (d < -tam / 2) d += tam;
+    return d;
+  };
+
+  function explotar(x, y, c) {
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * 6.283, s = 40 + Math.random() * 130;
+      particulas.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vida: 0.5 + Math.random() * 0.4, c });
+    }
+  }
+
+  function sonidosLocales() {
+    if (ent.fire && !laserPrev) RetroAudio.playLaser();
+    laserPrev = ent.fire;
+    if (ent.thrust && !thrustPrev) RetroAudio.startThrust();
+    else if (!ent.thrust && thrustPrev) RetroAudio.stopThrust();
+    thrustPrev = ent.thrust;
+  }
+
+  JUEGOS.spacewar = {
+    nombre: "Spacewar 1979",
+    desc: "Duelo de naves con inercia. Girá, empujá, dispará. Primero en quedarse sin vidas pierde.",
+    canvas: { w: SW.W, h: SW.H },
+
+    iniciarHost() { sim = new SpacewarSim(); hAcc = 0; hSend = 0; hLast = performance.now(); ganadorPrev = 0; enganchar(); },
+    iniciarGuest() {
+      sim = null; snap = null;
+      G.predN2 = { x: SW.W * 0.8, y: SW.H * 0.5, ang: Math.PI, vx: 0, vy: 0 };
+      G.vistaN1 = { x: SW.W * 0.2, y: SW.H * 0.5, ang: 0 };
+      ganadorPrev = 0;
+      enganchar();
+    },
+    destruir() { soltar(); sim = null; snap = null; particulas.length = 0; },
+
+    onData(m) {
+      if (net.rol === 1) {
+        if (!m || !sim) return;
+        if (m.t === "in") sim.aplicarInputGuest(m);
+        else if (m.t === "rev") sim.pedirRevancha(2);
+      } else if (m && m.t === "e") {
+        snap = m; snapStamp = performance.now();
+        if (m.expl) for (const e of m.expl) { explotar(e.x, e.y, e.c); RetroAudio.playExplosion(); }
+      }
+    },
+
+    frame(now, dt, pausado) {
+      sonidosLocales();
+
+      // ---------- HOST ----------
+      if (net.rol === 1 && sim) {
+        if (!pausado) {
+          let d = now - hLast; if (!(d > 0)) d = 16.7; if (d > 250) d = 250;
+          hLast = now;
+          hAcc += d;
+          sim.aplicarInputHost(ent);
+          const paso = 1000 / SW.SIM_HZ;
+          let k = 0;
+          while (hAcc >= paso && k < 16) { sim.step(paso / 1000); hAcc -= paso; k++; }
+        } else hLast = now;
+
+        const s = sim.snapshot();               // vacia sim.expl -> s.expl
+        if (s.expl) { for (const e of s.expl) explotar(e.x, e.y, e.c); RetroAudio.playExplosion(); }
+        net.enviar(JSON.stringify(s));           // spacewar: snapshot cada frame (~400 B, trivial)
+        pintar(s, 1);
+        if (s.ganador && !ganadorPrev && s.ganador === 1) RetroAudio.playWin();
+        ganadorPrev = s.ganador;
+        return;
+      }
+
+      // ---------- GUEST ----------
+      if (net.rol === 2) {
+        if (!pausado) net.enviar(JSON.stringify({ t: "in", rot: ent.rot, thrust: ent.thrust, fire: ent.fire }));
+        if (!snap) { pintar(null, 2); return; }
+
+        // prediccion de tu nave (jugador 2): posicion Y angulo locales
+        if (!pausado && !snap.ganador && snap.n2.vv) {
+          integrarNave(G.predN2, ent, dt);
+          const dx = wrapDelta(G.predN2.x, snap.n2.x, SW.W);
+          const dy = wrapDelta(G.predN2.y, snap.n2.y, SW.H);
+          if (Math.hypot(dx, dy) > 60) {
+            G.predN2.x = snap.n2.x; G.predN2.y = snap.n2.y;
+            G.predN2.vx = snap.n2.vx; G.predN2.vy = snap.n2.vy; G.predN2.ang = snap.n2.ang;
+          } else {
+            G.predN2.x = (G.predN2.x + dx * 0.12 + SW.W) % SW.W;
+            G.predN2.y = (G.predN2.y + dy * 0.12 + SW.H) % SW.H;
+          }
+        } else {
+          G.predN2.x = snap.n2.x; G.predN2.y = snap.n2.y; G.predN2.ang = snap.n2.ang;
+          G.predN2.vx = snap.n2.vx; G.predN2.vy = snap.n2.vy;
+        }
+
+        // interpolacion de la nave rival (jugador 1)
+        const kx = wrapDelta(G.vistaN1.x, snap.n1.x, SW.W);
+        const ky = wrapDelta(G.vistaN1.y, snap.n1.y, SW.H);
+        G.vistaN1.x = (G.vistaN1.x + kx * 0.35 + SW.W) % SW.W;
+        G.vistaN1.y = (G.vistaN1.y + ky * 0.35 + SW.H) % SW.H;
+        G.vistaN1.ang = angLerp(G.vistaN1.ang, snap.n1.ang, 0.4);
+
+        const edad = (now - snapStamp) / 1000;
+        const vista = {
+          ...snap,
+          n1: { ...snap.n1, x: G.vistaN1.x, y: G.vistaN1.y, ang: G.vistaN1.ang },
+          n2: { ...snap.n2, x: G.predN2.x, y: G.predN2.y, ang: G.predN2.ang },
+          b: snap.b.map(([x, y, vx, vy, d]) => [
+            (x + vx * edad + SW.W) % SW.W, (y + vy * edad + SW.H) % SW.H, vx, vy, d,
+          ]),
+        };
+        pintar(vista, 2);
+        if (snap.ganador && !ganadorPrev && snap.ganador === 2) RetroAudio.playWin();
+        ganadorPrev = snap.ganador;
+      }
+    },
+
+    overlay() {
+      const g = net.rol === 1 && sim ? sim.ganador : (snap && snap.ganador);
+      if (!g) return null;
+      const yo = net.rol === 1 && sim ? sim.revancha[1] : (snap && (net.rol === 1 ? snap.rev1 : snap.rev2));
+      return {
+        texto: g === net.rol ? "GANASTE 🚀" : "PERDISTE",
+        sub: yo ? "Esperando al rival…" : "Se quedó sin naves",
+        revancha: true, revanchaPedida: yo,
+      };
+    },
+    revancha() {
+      if (net.rol === 1 && sim) sim.pedirRevancha(1);
+      else net.enviar(JSON.stringify({ t: "rev" }));
+    },
+  };
+
+  // ---------- render ----------
+  function nave(x, y, ang, color, thrust, invuln) {
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(ang);
+    if (invuln) {
+      ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(0, 0, SW.NAVE_R + 6, 0, 6.2832); ctx.stroke();
+    }
+    ctx.strokeStyle = color; ctx.fillStyle = "#050805"; ctx.lineWidth = 2;
+    ctx.shadowColor = color; ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(SW.NAVE_R + 4, 0);
+    ctx.lineTo(-SW.NAVE_R, -SW.NAVE_R * 0.75);
+    ctx.lineTo(-SW.NAVE_R * 0.4, 0);
+    ctx.lineTo(-SW.NAVE_R, SW.NAVE_R * 0.75);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (thrust) {
+      ctx.strokeStyle = "#ff4400";
+      ctx.beginPath();
+      ctx.moveTo(-SW.NAVE_R * 0.4, -4);
+      ctx.lineTo(-SW.NAVE_R * 0.4 - (6 + Math.random() * 8), 0);
+      ctx.lineTo(-SW.NAVE_R * 0.4, 4);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.shadowBlur = 0;
+  }
+
+  function pintar(s, miNum) {
+    ctx.fillStyle = "#030603"; ctx.fillRect(0, 0, SW.W, SW.H);
+    ctx.strokeStyle = "rgba(57,255,20,0.05)"; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = 0; x < SW.W; x += 80) { ctx.moveTo(x, 0); ctx.lineTo(x, SW.H); }
+    for (let y = 0; y < SW.H; y += 80) { ctx.moveTo(0, y); ctx.lineTo(SW.W, y); }
+    ctx.stroke();
+
+    // particulas de explosion (locales)
+    for (let i = particulas.length - 1; i >= 0; i--) {
+      const p = particulas[i];
+      p.vida -= 0.016; if (p.vida <= 0) { particulas.splice(i, 1); continue; }
+      p.x += p.vx * 0.016; p.y += p.vy * 0.016;
+      ctx.globalAlpha = Math.max(0, p.vida);
+      ctx.fillStyle = p.c;
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+    ctx.globalAlpha = 1;
+
+    if (!s) {
+      ctx.fillStyle = "#39ff14"; ctx.font = "15px ui-monospace, monospace"; ctx.textAlign = "center";
+      ctx.fillText("Sincronizando naves…", SW.W / 2, SW.H / 2);
+      return;
+    }
+
+    for (const [x, y, , , d] of s.b) {
+      ctx.fillStyle = d === 1 ? SW.COL_P1 : SW.COL_P2;
+      ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.arc(x, y, SW.BALA_R, 0, 6.2832); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    if (s.n1.vv) nave(s.n1.x, s.n1.y, s.n1.ang, SW.COL_P1, s.n1.th, s.n1.iv);
+    if (s.n2.vv) nave(s.n2.x, s.n2.y, s.n2.ang, SW.COL_P2, s.n2.th, s.n2.iv);
+
+    ctx.font = "bold 15px ui-monospace, monospace"; ctx.textAlign = "left";
+    ctx.fillStyle = SW.COL_P1;
+    ctx.fillText((miNum === 1 ? "VOS ▸ " : "") + "P1 " + "▲".repeat(Math.max(0, s.n1.vd)), 20, 26);
+    ctx.textAlign = "right";
+    ctx.fillStyle = SW.COL_P2;
+    ctx.fillText("P2 " + "▲".repeat(Math.max(0, s.n2.vd)) + (miNum === 2 ? " ◂ VOS" : ""), SW.W - 20, 26);
+    ctx.textAlign = "left";
+  }
+})();
+
+
+// ==========================================================================
 //  SHELL: selector de juego + transporte P2P (PeerJS/WebRTC) + loop maestro.
 //  Cada juego es un modulo en JUEGOS.xxx con:
 //    nombre, desc, canvas:{w,h}
@@ -1028,6 +1631,15 @@ const net = {
   get rol() { return rol; },
   enviar(x) { try { if (conn && conn.open) conn.send(x); } catch (e) {} },
 };
+
+// audio: arranca con el primer gesto del usuario (politica de autoplay)
+function _iniAudio() {
+  try { RetroAudio.init(); } catch (e) {}
+  window.removeEventListener("pointerdown", _iniAudio);
+  window.removeEventListener("keydown", _iniAudio);
+}
+window.addEventListener("pointerdown", _iniAudio);
+window.addEventListener("keydown", _iniAudio);
 
 function azar4() {
   let s = "";
@@ -1189,6 +1801,9 @@ $("btnCancelar").onclick = volverAlMenu;
 $("btnCancelar2").onclick = volverAlMenu;
 $("btnMenu").onclick = volverAlMenu;
 $("btnRevancha").onclick = () => { if (juego && juego.revancha) juego.revancha(); _fw = ""; };
+$("btnMute").onclick = () => {
+  try { RetroAudio.init(); $("btnMute").textContent = RetroAudio.toggleMute() ? "🔇" : "🔊"; } catch (e) {}
+};
 
 // ---------- selector ----------
 function pintarSelector() {

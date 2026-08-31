@@ -1,4 +1,4 @@
-// Tests de logica pura (sin navegador): sims de Pong y Billar.
+// Tests de logica pura (sin navegador): sims de Pong, Billar y Spacewar.
 //   node src/test.mjs
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
@@ -8,8 +8,8 @@ import vm from "vm";
 const SRC = dirname(fileURLToPath(import.meta.url));
 const rd = (f) => readFileSync(join(SRC, f), "utf8");
 
-const codigo = [rd("const.js"), rd("pong.sim.js"), rd("billar.sim.js")].join("\n") +
-  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro };";
+const codigo = [rd("const.js"), rd("pong.sim.js"), rd("billar.sim.js"), rd("spacewar.sim.js")].join("\n") +
+  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim };";
 const sb = { performance: { now: () => Date.now() }, Math };
 vm.createContext(sb);
 new vm.Script(codigo).runInContext(sb);
@@ -100,6 +100,63 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   e._prim = 8; e._cue = false; e._metidas = [8];
   e._resolver();
   t("billar: 8 legal con grupo limpio -> gana", e.ganador === 1 && e.fase === "fin");
+}
+
+// ================= SPACEWAR =================
+{
+  const dt = 1 / 120;
+  const s = new A.SpacewarSim();
+  t("spacewar: 2 naves vivas y 5 vidas", s.naves[1].viva && s.naves[2].viva && s.vidas[1] === 5 && s.vidas[2] === 5);
+
+  // empuje: la nave 1 acelera hacia su angulo (0 = este)
+  s.aplicarInputHost({ rot: 0, thrust: true, fire: false });
+  for (let i = 0; i < 30; i++) s.step(dt);
+  t("spacewar: el empuje mueve la nave", s.naves[1].x > A.SW.W * 0.2 + 1 && Math.hypot(s.naves[1].vx, s.naves[1].vy) > 1);
+  t("spacewar: respeta VEL_MAX", Math.hypot(s.naves[1].vx, s.naves[1].vy) <= A.SW.VEL_MAX + 1);
+
+  // rotacion
+  const s2 = new A.SpacewarSim();
+  s2.aplicarInputHost({ rot: 1, thrust: false, fire: false });
+  const a0 = s2.naves[1].ang;
+  for (let i = 0; i < 12; i++) s2.step(dt);
+  t("spacewar: rota con rot=1", Math.abs(s2.naves[1].ang - a0) > 0.1);
+
+  // disparo con cooldown
+  const s3 = new A.SpacewarSim();
+  s3.naves[1].invuln = 0; s3.naves[2].invuln = 0;
+  s3.aplicarInputHost({ rot: 0, thrust: false, fire: true });
+  s3.step(dt);
+  t("spacewar: dispara una bala", s3.balas.length === 1);
+  for (let i = 0; i < 5; i++) s3.step(dt);
+  t("spacewar: respeta el cooldown", s3.balas.length === 1);
+
+  // impacto: bala pegada a la nave 2 -> pierde una vida
+  const s4 = new A.SpacewarSim();
+  s4.naves[2].invuln = 0;
+  s4.balas.push({ x: s4.naves[2].x, y: s4.naves[2].y, vx: 0, vy: 0, d: 1, vida: 1 });
+  s4.step(dt);
+  t("spacewar: impacto quita vida", s4.vidas[2] === 4 && !s4.naves[2].viva);
+  const s4snap = s4.snapshot();
+  t("spacewar: explosion en el snapshot", Array.isArray(s4snap.expl) && s4snap.expl.length === 1);
+  t("spacewar: snapshot vacia expl", s4.snapshot().expl === null);
+
+  // sin vidas -> gana el otro
+  const s5 = new A.SpacewarSim();
+  s5.naves[2].invuln = 0; s5.vidas[2] = 1;
+  s5.balas.push({ x: s5.naves[2].x, y: s5.naves[2].y, vx: 0, vy: 0, d: 1, vida: 1 });
+  s5.step(dt);
+  t("spacewar: sin vidas gana el rival", s5.ganador === 1);
+
+  // snapshot serializable
+  const snap = new A.SpacewarSim().snapshot();
+  t("spacewar: snapshot JSON valido", JSON.parse(JSON.stringify(snap)).n1.vd === 5);
+
+  // wrap-around
+  const s6 = new A.SpacewarSim();
+  s6.naves[1].x = A.SW.W - 1; s6.naves[1].vx = 400; s6.naves[1].invuln = 0;
+  s6.aplicarInputHost({ rot: 0, thrust: false, fire: false });
+  for (let i = 0; i < 30; i++) s6.step(dt);
+  t("spacewar: wrap-around horizontal", s6.naves[1].x >= 0 && s6.naves[1].x < A.SW.W);
 }
 
 console.log(`\n${ok} OK, ${fail} FAIL`);

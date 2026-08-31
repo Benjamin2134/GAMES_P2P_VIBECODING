@@ -5,7 +5,8 @@ Colección de juegos para **2 jugadores por internet**, en **un solo archivo HTM
 con **WebRTC**; un mini-servicio gratis (`0.peerjs.com`) sólo intercambia el
 código de sala.
 
-Juegos: **Pong** y **Billar (8-ball)**.
+Juegos: **Pong**, **Billar (8-ball)** y **Spacewar 1979**. Con sonido retro
+(sintetizador Web Audio, botón 🔊 para silenciar).
 
 ## Jugar
 
@@ -27,6 +28,13 @@ Por turnos. Apuntás con el **mouse**, **mantenés apretado** para cargar fuerza
 blanca donde quiera con un **click**. Gana quien mete la 8 legal después de
 limpiar su grupo (lisas o rayas). Reglas 8-ball simplificadas pero reales:
 grupos, faltas, bola en mano, scratch.
+
+### Spacewar 1979
+Duelo de naves con inercia newtoniana. <kbd>←</kbd>/<kbd>→</kbd> giran,
+<kbd>↑</kbd> empuje, <kbd>espacio</kbd> dispara. Los bordes hacen *wrap-around*.
+5 vidas cada uno; escudo breve al reaparecer. Basado en el PR de **@777.dub**,
+adaptado a esta arquitectura (loop rAF, predicción de tu nave, interpolación de
+la rival, dead-reckoning de las balas).
 
 Cómo conectar desde otra casa cuando el P2P directo no engancha (NAT duro → TURN):
 ver `LEEME.txt`.
@@ -52,14 +60,18 @@ GAMESP2P.html        <- EL JUEGO. Archivo único autocontenido (GENERADO).
 LEEME.txt            <- instrucciones para jugadores + cómo agregar TURN
 src/
   const.js           <- comunes (clamp, lerp, registro JUEGOS)
+  audio.js           <- RetroAudio: sintetizador Web Audio (láser, thrust, explosión…)
   shell.js           <- selector de juego + transporte P2P + loop maestro
-  pong.sim.js  pong.js     <- Pong: simulación + módulo (netcode, render)
-  billar.sim.js  billar.js <- Billar: simulación 8-ball + módulo (input, render)
+  pong.sim.js  pong.js       <- Pong
+  billar.sim.js  billar.js   <- Billar 8-ball
+  spacewar.sim.js  spacewar.js <- Spacewar 1979
   template.html      <- HTML + CSS con /*__PEERJS__*/ y /*__BUNDLE__*/
   peerjs.min.js      <- PeerJS 1.5.4 vendorizado
   build.mjs          <- ensambla -> GAMESP2P.html
   test.mjs           <- tests de la lógica pura (node src/test.mjs)
 ```
+
+Ver **`AGENTS.md`** para el flujo de trabajo en equipo y cómo agregar un juego.
 
 Un juego = un objeto en `JUEGOS.xxx` con:
 `nombre, desc, canvas:{w,h}, iniciarHost(), iniciarGuest(), destruir(),

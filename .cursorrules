@@ -1,0 +1,6 @@
+# Cursor AI Rules
+Antes de crear o modificar código en este repo:
+1. Leé y seguí AGENTS.md.
+2. No edites GAMESP2P.html a mano (es generado). Todo va en src/.
+3. Corré `node src/test.mjs` y `node src/build.mjs` antes de commitear.
+4. No agregues HUD de red/debug en pantalla (FPS, RTT, jitter, directo/relay).
