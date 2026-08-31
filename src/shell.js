@@ -57,7 +57,8 @@ function ajustarCanvas(w, h) {
   cv.width = w * DPR; cv.height = h * DPR;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.textBaseline = "alphabetic";
-  $("lienzoWrap").style.width = "min(" + w + "px, 96vw)";
+  const displayW = Math.max(w, 960);
+  $("lienzoWrap").style.width = "min(" + displayW + "px, 96vw)";
 }
 window.addEventListener("resize", () => { if (juego && enJuego) ajustarCanvas(juego.canvas.w, juego.canvas.h); });
 
