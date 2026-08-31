@@ -18,6 +18,13 @@ COMO JUGAR
 
 CONTROLES
   W / S   o   flechas arriba / abajo.  Primero a 5 puntos gana. Hay boton de revancha.
+  Tecla H = muestra/oculta el HUD de red (FPS, RTT, jitter, KB/s, directo o relay).
+
+RENDIMIENTO
+  El juego usa netcode de verdad: fisica a 120 Hz, estado en binario, canal sin
+  reintentos (baja latencia), tu pala responde al instante (autoridad de cliente)
+  y la pelota / la pala rival se predicen para que no se vean tirones.
+  Detalles en README.md.
 
 IMPORTANTE (limitaciones reales)
   - El que "Crea la sala" es el que corre la simulacion. Si cualquiera de los
