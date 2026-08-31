@@ -180,6 +180,7 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   }
 
   // Pasar turno
+  mono.dobles = false;
   mono.pasarTurno(1);
   t("monopoly: turno pasa a J2", mono.turno === 2 && mono.faseTurno === "tirar");
 }
