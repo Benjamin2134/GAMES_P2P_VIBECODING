@@ -20,10 +20,10 @@ CONTROLES
   W / S   o   flechas arriba / abajo.  Primero a 5 puntos gana. Hay boton de revancha.
 
 IMPORTANTE (limitaciones reales)
-  - El que "Crea la sala" es el que corre la simulacion. Tiene que dejar la
-    pestana VISIBLE; si la minimiza, el juego se ralentiza para los dos
-    (el navegador frena las pestanas de fondo). Volviendo a la pestana se
-    normaliza.
+  - El que "Crea la sala" es el que corre la simulacion. Si cualquiera de los
+    dos cambia de pestana o minimiza, el juego se PAUSA para ambos (aparece
+    "Pausa") y sigue solo al volver. O sea: no se pierde, pero hay que volver
+    a la pestana para jugar.
   - En ~1 de cada 6 conexiones caseras el P2P directo no engancha (NAT duro /
     CGNAT de algunos ISP). En ese caso arriba de la cancha vas a ver
     "via relay" en gris, o directamente no conecta. Solucion: configurar un
@@ -45,5 +45,8 @@ DEJARLO CON LINK FIJO (recomendado para no pasar archivos)
   Como es 1 solo archivo, literalmente subis pong.html y ya.
 
 ARCHIVOS
-  pong.html   el juego completo (incluye PeerJS 1.5.4 embebido)
+  pong.html   el juego completo (incluye PeerJS 1.5.4 embebido) -- GENERADO
   LEEME.txt   esto
+  README.md   info para desarrollar
+  src/        codigo fuente. Para editar: tocar src/*.js y correr
+              "node src/build.mjs" para regenerar pong.html
