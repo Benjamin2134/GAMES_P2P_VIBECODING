@@ -1,4 +1,4 @@
-// Tests de logica pura (sin navegador): Pong, Billar, Spacewar, Battleship, Tron y Monopoly.
+// Tests de logica pura (sin navegador): Pong, Billar, Spacewar, Battleship, Tron, Monopoly y Techno.
 //   node src/test.mjs
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
@@ -15,9 +15,10 @@ const codigo = [
   rd("spacewar.sim.js"),
   rd("battleship.sim.js"),
   rd("tron.sim.js"),
-  rd("monopoly.sim.js")
+  rd("monopoly.sim.js"),
+  rd("techno.sim.js")
 ].join("\n") +
-  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim, BATTLESHIP, BattleshipSim, TRON, TronSim, MONOPOLY, MonopolySim };";
+  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim, BATTLESHIP, BattleshipSim, TRON, TronSim, MONOPOLY, MonopolySim, TECHNO, TechnoSim };";
 
 const sb = { performance: { now: () => Date.now() }, Math, setTimeout: (fn) => fn() };
 vm.createContext(sb);
@@ -183,6 +184,71 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   mono.dobles = false;
   mono.pasarTurno(1);
   t("monopoly: turno pasa a J2", mono.turno === 2 && mono.faseTurno === "tirar");
+}
+
+// ================= TECHNO =================
+{
+  const ts = new A.TechnoSim();
+  t("techno: grid tiene 8 canales", ts.grid.length === 8);
+  t("techno: cada canal tiene 16 pasos", ts.grid[0].length === 16);
+  t("techno: bpm default es 130", ts.bpm === 130);
+  t("techno: kick en 4x4 por defecto", ts.grid[0][0] === true && ts.grid[0][4] === true && ts.grid[0][8] === true && ts.grid[0][12] === true);
+  t("techno: canales bass arrancan en -1 (off)", ts.grid[4][0] === -1 && ts.grid[5][3] === -1);
+
+  // Reloj avanza steps
+  const stepDur = 60 / 130 / 4; // ~0.1154 seg
+  for (let i = 0; i < 120; i++) ts.step(1 / 120);
+  t("techno: step avanza tras suficientes dt", ts.currentStep > 0);
+  t("techno: seq incrementa", ts.seq > 0);
+
+  // Toggle drum
+  const ts2 = new A.TechnoSim();
+  t("techno: step 1 de kick arranca off", ts2.grid[0][1] === false);
+  ts2.toggleStep(0, 1);
+  t("techno: toggle prende step", ts2.grid[0][1] === true);
+  ts2.toggleStep(0, 1);
+  t("techno: toggle apaga step", ts2.grid[0][1] === false);
+
+  // Toggle bass
+  t("techno: step 0 de bass5 arranca off", ts2.grid[4][0] === -1);
+  ts2.toggleStep(4, 0);
+  t("techno: toggle bass prende con nota", ts2.grid[4][0] === ts2.bassNotes[0]);
+  ts2.toggleStep(4, 0);
+  t("techno: toggle bass apaga", ts2.grid[4][0] === -1);
+
+  // BPM clamp
+  ts2.setBpm(50);
+  t("techno: bpm no baja de 100", ts2.bpm === 100);
+  ts2.setBpm(200);
+  t("techno: bpm no sube de 160", ts2.bpm === 160);
+  ts2.setBpm(140);
+  t("techno: bpm acepta valor valido", ts2.bpm === 140);
+
+  // Filtro clamp
+  ts2.setFilter(50, 50);
+  t("techno: cutoff clampeado min", ts2.cutoff === A.TECHNO.CUT_MIN);
+  t("techno: resonance clampeado max", ts2.resonance === A.TECHNO.RES_MAX);
+  ts2.setFilter(3000, 15);
+  t("techno: filtro acepta valores validos", ts2.cutoff === 3000 && ts2.resonance === 15);
+
+  // Nota
+  ts2.setNote(4, 5);
+  t("techno: setNote cambia bassNotes", ts2.bassNotes[0] === 5);
+  ts2.setNote(0, 3); // fuera de rango (ch < 4)
+  t("techno: setNote ignora canales drum", true); // no crash
+
+  // Mute
+  t("techno: canal 0 no muteado", ts2.mute[0] === false);
+  ts2.toggleMute(0);
+  t("techno: toggleMute mutea", ts2.mute[0] === true);
+  ts2.toggleMute(0);
+  t("techno: toggleMute desmutea", ts2.mute[0] === false);
+
+  // Snapshot
+  const snap = ts2.snapshot();
+  t("techno: snapshot tiene tipo e", snap.t === "e");
+  t("techno: snapshot tiene grid", Array.isArray(snap.grid));
+  t("techno: snapshot tiene bpm", typeof snap.bpm === "number");
 }
 
 console.log(`\n${ok} OK, ${fail} FAIL`);
