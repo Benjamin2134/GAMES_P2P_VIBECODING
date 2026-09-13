@@ -189,14 +189,15 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
 // ================= TECHNO =================
 {
   const ts = new A.TechnoSim();
-  t("techno: grid tiene 8 canales", ts.grid.length === 8);
-  t("techno: cada canal tiene 16 pasos", ts.grid[0].length === 16);
+  t("techno: grid tiene 11 canales (4 drums + 7 melodia)", ts.grid.length === 11);
+  t("techno: cada canal tiene 17 pasos", ts.grid[0].length === 17);
   t("techno: bpm default es 130", ts.bpm === 130);
   t("techno: kick en 4x4 por defecto", ts.grid[0][0] === true && ts.grid[0][4] === true && ts.grid[0][8] === true && ts.grid[0][12] === true);
-  t("techno: canales bass arrancan en -1 (off)", ts.grid[4][0] === -1 && ts.grid[5][3] === -1);
+  t("techno: canales de melodia arrancan en -1 (off)", ts.grid[4][0] === -1 && ts.grid[10][3] === -1);
+  t("techno: 7 notas por defecto (bajo x4 + sinte + piano + guitarra)", ts.melodyNotes.length === 7);
+  t("techno: nombres de canal cubren los 11", A.TECHNO.NOMBRES_CANAL.length === 11 && A.TECHNO.NOMBRES_CANAL[8] === "SYNTH" && A.TECHNO.NOMBRES_CANAL[10] === "GTR");
 
   // Reloj avanza steps
-  const stepDur = 60 / 130 / 4; // ~0.1154 seg
   for (let i = 0; i < 120; i++) ts.step(1 / 120);
   t("techno: step avanza tras suficientes dt", ts.currentStep > 0);
   t("techno: seq incrementa", ts.seq > 0);
@@ -209,12 +210,32 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   ts2.toggleStep(0, 1);
   t("techno: toggle apaga step", ts2.grid[0][1] === false);
 
-  // Toggle bass
-  t("techno: step 0 de bass5 arranca off", ts2.grid[4][0] === -1);
+  // Toggle canal de melodia (bajo, ch 4)
+  t("techno: step 0 de bass1 arranca off", ts2.grid[4][0] === -1);
   ts2.toggleStep(4, 0);
-  t("techno: toggle bass prende con nota", ts2.grid[4][0] === ts2.bassNotes[0]);
+  t("techno: toggle bajo prende con nota", ts2.grid[4][0] === ts2.melodyNotes[0]);
   ts2.toggleStep(4, 0);
-  t("techno: toggle bass apaga", ts2.grid[4][0] === -1);
+  t("techno: toggle bajo apaga", ts2.grid[4][0] === -1);
+
+  // Instrumentos nuevos: sinte (8), piano (9), guitarra (10)
+  ts2.toggleStep(8, 2);
+  t("techno: toggle sinte prende con su nota", ts2.grid[8][2] === ts2.melodyNotes[4]);
+  ts2.toggleStep(9, 2);
+  t("techno: toggle piano prende con su nota", ts2.grid[9][2] === ts2.melodyNotes[5]);
+  ts2.toggleStep(10, 2);
+  t("techno: toggle guitarra prende con su nota", ts2.grid[10][2] === ts2.melodyNotes[6]);
+  ts2.toggleStep(10, 16); // ultimo paso: el "1 slot mas" (indice 16, paso 17)
+  t("techno: el paso 17 (indice 16) existe y es editable", ts2.grid[10][16] !== -1);
+
+  // setStepValue: aplica un valor ya resuelto (idempotente, para la red)
+  const ts3 = new A.TechnoSim();
+  ts3.setStepValue(0, 3, true);
+  t("techno: setStepValue prende un paso de drum", ts3.grid[0][3] === true);
+  ts3.setStepValue(0, 3, true); // aplicar dos veces no debe alternar (no es un toggle)
+  t("techno: setStepValue es idempotente", ts3.grid[0][3] === true);
+  ts3.setMuteValue(1, true);
+  ts3.setMuteValue(1, true);
+  t("techno: setMuteValue es idempotente", ts3.mute[1] === true);
 
   // BPM clamp
   ts2.setBpm(50);
@@ -233,7 +254,7 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
 
   // Nota
   ts2.setNote(4, 5);
-  t("techno: setNote cambia bassNotes", ts2.bassNotes[0] === 5);
+  t("techno: setNote cambia melodyNotes", ts2.melodyNotes[0] === 5);
   ts2.setNote(0, 3); // fuera de rango (ch < 4)
   t("techno: setNote ignora canales drum", true); // no crash
 
@@ -249,6 +270,41 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   t("techno: snapshot tiene tipo e", snap.t === "e");
   t("techno: snapshot tiene grid", Array.isArray(snap.grid));
   t("techno: snapshot tiene bpm", typeof snap.bpm === "number");
+
+  // ---- SINCRONIZACION: dos relojes independientes (host + guest) ----
+  // El punto central del arreglo: cada maquina tiene SU PROPIO TechnoSim y
+  // el audio depende solo de "step()" local. La red solo debe:
+  //  1) mandar ediciones de grid/mute/bpm/filtro/nota (ya cubierto arriba)
+  //  2) corregir la FASE del reloj del guest de a poco, sin "tocar" el audio
+  const host = new A.TechnoSim(), guest = new A.TechnoSim();
+  host.setBpm(130); guest.setBpm(130);
+  // avanzamos el host mucho mas que al guest para simular deriva/jitter de red
+  for (let i = 0; i < 400; i++) host.step(1 / 120);
+  for (let i = 0; i < 40; i++) guest.step(1 / 120);
+  const antesStep = guest.currentStep;
+  const antesGanancia = Math.abs((host.currentStep * host.stepDuration + host.acc) - (guest.currentStep * guest.stepDuration + guest.acc));
+  guest.resyncFromHost(host.currentStep, host.acc, host.bpm);
+  const despuesGanancia = Math.abs((host.currentStep * host.stepDuration + host.acc) - (guest.currentStep * guest.stepDuration + guest.acc));
+  t("techno: resyncFromHost nunca dispara audio (no toca stepTriggered)", guest.stepTriggered === false);
+  t("techno: resyncFromHost acerca la fase del guest a la del host", despuesGanancia < antesGanancia || despuesGanancia < 0.01);
+
+  // Correccion suave: una diferencia chica no debe "saltar" el paso de una
+  const g2 = new A.TechnoSim();
+  g2.currentStep = 5; g2.acc = 0.01;
+  const stepAntes = g2.currentStep;
+  g2.resyncFromHost(5, 0.03, 130); // diferencia de 20ms, bien menor a un paso (~115ms @130bpm)
+  t("techno: correccion chica no cambia el paso de forma brusca", Math.abs(g2.currentStep - stepAntes) <= 1);
+
+  // Correccion grande (recien conectado): debe corregir directo una vez
+  const g3 = new A.TechnoSim();
+  g3.currentStep = 0; g3.acc = 0;
+  g3.resyncFromHost(9, 0.02, 130);
+  t("techno: desvio grande corrige directo al paso del host", g3.currentStep === 9);
+
+  // resyncFromHost tambien alinea el bpm si el host lo cambio
+  const g4 = new A.TechnoSim();
+  g4.resyncFromHost(g4.currentStep, g4.acc, 150);
+  t("techno: resyncFromHost alinea el bpm", g4.bpm === 150);
 }
 
 console.log(`\n${ok} OK, ${fail} FAIL`);

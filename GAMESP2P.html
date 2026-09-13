@@ -1795,13 +1795,23 @@ if (typeof module !== "undefined" && module.exports) {
 
 
 // ==========================================================================
-//  Simulacion autoritativa de TECHNO GROOVEBOX (corre en el host).
-//  Reloj de tempo maestro, matriz de secuenciador 8 canales x 16 pasos,
-//  estado de filtro 303, mutes y ganchos para modos de juego futuros.
+//  Simulacion autoritativa de TECHNO GROOVEBOX.
+//
+//  IMPORTANTE (arquitectura de red): esta clase es el "reloj" del secuenciador
+//  y corre EN LOS DOS LADOS (host y guest), cada uno con su propia instancia,
+//  avanzando localmente a partir de requestAnimationFrame. Por red SOLO viajan:
+//    - ediciones de estado (que ficha esta prendida, mute, bpm, filtro, nota)
+//    - una correccion de fase de baja frecuencia (resyncFromHost) para que los
+//      dos relojes no se desalineen con el correr de los minutos.
+//  El SONIDO nunca depende de la llegada de un paquete: cada maquina dispara
+//  su propio audio en el instante en que SU PROPIO acumulador cruza un paso.
+//  Asi no hay cortes ni desfase por jitter de red (ver src/techno.js).
 // ==========================================================================
 const TECHNO = {
-  CANALES: 8,         // 0-3 drums (host), 4-7 bass (guest)
-  PASOS: 16,
+  CANALES: 11,        // 0-3 drums (host) · 4-10 melodia (guest): bajo x4 + sinte + piano + guitarra
+  DRUM_ROWS: 4,
+  MELODY_ROWS: 7,
+  PASOS: 17,
   BPM_MIN: 100,
   BPM_MAX: 160,
   BPM_DEF: 130,
@@ -1811,7 +1821,7 @@ const TECHNO = {
   RES_MIN: 0.5,
   RES_MAX: 30,
   RES_DEF: 8,
-  // Escala de Do menor para el bajo (frecuencias Hz)
+  // Escala de Do menor (frecuencias Hz) para los canales melodicos
   NOTAS: [
     { nombre: "C2",  hz: 65.41 },
     { nombre: "D2",  hz: 73.42 },
@@ -1826,15 +1836,16 @@ const TECHNO = {
     { nombre: "F3",  hz: 174.61 },
     { nombre: "G3",  hz: 196.00 },
   ],
-  NOMBRES_CANAL: ["KICK", "SNARE", "C.HAT", "O.HAT", "BASS1", "BASS2", "BASS3", "BASS4"],
+  // 0-3 drums, 4-7 bajo 303, 8 sinte, 9 piano, 10 guitarra
+  NOMBRES_CANAL: ["KICK", "SNARE", "C.HAT", "O.HAT", "BASS1", "BASS2", "BASS3", "BASS4", "SYNTH", "PIANO", "GTR"],
 };
 
 class TechnoSim {
   constructor() {
-    // Grid: 8 canales x 16 pasos. Para drums = boolean, para bass = indice de nota (-1 = off)
+    // Grid: CANALES x PASOS. Drums = boolean, melodia = indice de nota (-1 = off)
     this.grid = [];
     for (let ch = 0; ch < TECHNO.CANALES; ch++) {
-      this.grid[ch] = new Array(TECHNO.PASOS).fill(ch < 4 ? false : -1);
+      this.grid[ch] = new Array(TECHNO.PASOS).fill(ch < TECHNO.DRUM_ROWS ? false : -1);
     }
     // Patron inicial: kick en 4x4 basico
     this.grid[0][0] = true; this.grid[0][4] = true;
@@ -1847,25 +1858,24 @@ class TechnoSim {
 
     this.bpm = TECHNO.BPM_DEF;
     this.currentStep = 0;
-    this.acc = 0;              // acumulador de tiempo
-    this.stepTriggered = false; // flag para disparar audio en este frame
+    this.acc = 0;               // acumulador de tiempo del paso actual (seg)
+    this.stepTriggered = false; // flag: en este step() se cruzo un paso nuevo
     this.playing = true;
 
     this.mute = new Array(TECHNO.CANALES).fill(false);
 
-    // Filtro 303 (controlado por guest)
+    // Filtro 303 (controlado por el guest, canales de bajo 4-7)
     this.cutoff = TECHNO.CUT_DEF;
     this.resonance = TECHNO.RES_DEF;
 
-    // Notas por defecto para canales de bass (indice en TECHNO.NOTAS)
-    this.bassNotes = [0, 3, 4, 7]; // C2, F2, G2, C3
+    // Nota por defecto de cada canal melodico (indice en TECHNO.NOTAS)
+    // [BASS1, BASS2, BASS3, BASS4, SYNTH, PIANO, GUITAR]
+    this.melodyNotes = [0, 3, 4, 7, 2, 6, 9];
 
-    // Escalabilidad: modo de juego y metricas
-    this.gameMode = "jam";     // "jam" | "groove" (B) | "battle" (C)
+    this.gameMode = "jam";
     this.energy = 0;
     this.barsPlayed = 0;
 
-    // Revancha (contrato del shell)
     this.revancha = { 1: false, 2: false };
     this.ganador = 0;
 
@@ -1873,9 +1883,10 @@ class TechnoSim {
   }
 
   get stepDuration() {
-    return 60 / this.bpm / 4; // duración de un step de 16th note en segundos
+    return 60 / this.bpm / 4; // duracion de un paso de semicorchea en segundos
   }
 
+  // Avanza el reloj LOCAL. No manda ni recibe nada: eso lo hace techno.js.
   step(dt) {
     if (!this.playing) { this.stepTriggered = false; return; }
     this.stepTriggered = false;
@@ -1883,35 +1894,59 @@ class TechnoSim {
     const dur = this.stepDuration;
     if (this.acc >= dur) {
       this.acc -= dur;
-      // Prevenir acumulación excesiva
-      if (this.acc > dur) this.acc = 0;
+      if (this.acc > dur) this.acc = 0;   // evita acumulacion excesiva tras un lag
       this.currentStep = (this.currentStep + 1) % TECHNO.PASOS;
       this.stepTriggered = true;
       this.seq++;
-      // Contar compases
       if (this.currentStep === 0) this.barsPlayed++;
     }
   }
 
-  toggleStep(ch, paso) {
-    if (ch < 0 || ch >= TECHNO.CANALES || paso < 0 || paso >= TECHNO.PASOS) return;
-    if (ch < 4) {
-      // Drum: boolean toggle
-      this.grid[ch][paso] = !this.grid[ch][paso];
+  // ---- correccion de fase (solo la llama el guest, con datos del host) ----
+  // Nunca dispara audio ni "salta" de forma audible salvo un desvio enorme
+  // (recien conectado o cambio brusco de tempo): es un ajuste tipo PLL que
+  // acerca el reloj local al del host un poco en cada llamada.
+  resyncFromHost(hostStep, hostAcc, hostBpm) {
+    if (typeof hostBpm === "number" && hostBpm !== this.bpm) this.bpm = hostBpm;
+    const dur = this.stepDuration;
+    const patternLen = TECHNO.PASOS * dur;
+    const hostTotal = hostStep * dur + hostAcc;
+    const myTotal = this.currentStep * dur + this.acc;
+    let diff = hostTotal - myTotal;
+    // envolver la diferencia al rango [-patternLen/2, patternLen/2] (ciclo del patron)
+    diff = ((diff + patternLen / 2) % patternLen + patternLen) % patternLen - patternLen / 2;
+    if (Math.abs(diff) > dur * 3) {
+      this.currentStep = hostStep;
+      this.acc = hostAcc;
     } else {
-      // Bass: toggle entre nota actual del canal y off (-1)
-      const noteIdx = this.bassNotes[ch - 4];
-      this.grid[ch][paso] = this.grid[ch][paso] === -1 ? noteIdx : -1;
+      this.acc += diff * 0.2;
+      while (this.acc >= dur) { this.acc -= dur; this.currentStep = (this.currentStep + 1) % TECHNO.PASOS; }
+      while (this.acc < 0) { this.acc += dur; this.currentStep = (this.currentStep - 1 + TECHNO.PASOS) % TECHNO.PASOS; }
     }
   }
 
+  // ---- ediciones locales (siempre disponibles: host y guest tienen su sim) ----
+  toggleStep(ch, paso) {
+    if (ch < 0 || ch >= TECHNO.CANALES || paso < 0 || paso >= TECHNO.PASOS) return;
+    if (ch < TECHNO.DRUM_ROWS) {
+      this.grid[ch][paso] = !this.grid[ch][paso];
+    } else {
+      const noteIdx = this.melodyNotes[ch - TECHNO.DRUM_ROWS];
+      this.grid[ch][paso] = this.grid[ch][paso] === -1 ? noteIdx : -1;
+    }
+  }
+  // Aplica un valor ya resuelto (lo que llega por red): idempotente, no
+  // depende de que el toggle remoto haya arrancado del mismo estado.
+  setStepValue(ch, paso, val) {
+    if (ch < 0 || ch >= TECHNO.CANALES || paso < 0 || paso >= TECHNO.PASOS) return;
+    this.grid[ch][paso] = val;
+  }
+
   setNote(ch, noteIdx) {
-    if (ch < 4 || ch >= TECHNO.CANALES) return;
+    if (ch < TECHNO.DRUM_ROWS || ch >= TECHNO.CANALES) return;
     if (noteIdx < 0 || noteIdx >= TECHNO.NOTAS.length) return;
-    const bassIdx = ch - 4;
-    const oldNote = this.bassNotes[bassIdx];
-    this.bassNotes[bassIdx] = noteIdx;
-    // Actualizar pasos activos con la nueva nota
+    const idx = ch - TECHNO.DRUM_ROWS;
+    this.melodyNotes[idx] = noteIdx;
     for (let s = 0; s < TECHNO.PASOS; s++) {
       if (this.grid[ch][s] !== -1) this.grid[ch][s] = noteIdx;
     }
@@ -1930,8 +1965,13 @@ class TechnoSim {
     if (ch < 0 || ch >= TECHNO.CANALES) return;
     this.mute[ch] = !this.mute[ch];
   }
+  setMuteValue(ch, val) {
+    if (ch < 0 || ch >= TECHNO.CANALES) return;
+    this.mute[ch] = !!val;
+  }
 
-  // Snapshot para enviar por red
+  // Snapshot solo para diagnostico/tests; la red NO usa esto para el audio
+  // (ver arriba). Se deja liviano por si se necesita en el futuro.
   snapshot() {
     return {
       t: "e",
@@ -1941,7 +1981,7 @@ class TechnoSim {
       bpm: this.bpm,
       cut: Math.round(this.cutoff),
       res: Math.round(this.resonance * 10) / 10,
-      notes: this.bassNotes,
+      notes: this.melodyNotes,
       playing: this.playing,
       bars: this.barsPlayed,
       seq: this.seq,
@@ -1949,13 +1989,11 @@ class TechnoSim {
   }
 
   pedirRevancha(n) {
-    // En modo jam no hay revancha; placeholder para modos futuros
     this.revancha[n] = true;
     if (this.revancha[1] && this.revancha[2]) {
       this.revancha = { 1: false, 2: false };
-      // Reset para nueva sesión
       for (let ch = 0; ch < TECHNO.CANALES; ch++) {
-        this.grid[ch] = new Array(TECHNO.PASOS).fill(ch < 4 ? false : -1);
+        this.grid[ch] = new Array(TECHNO.PASOS).fill(ch < TECHNO.DRUM_ROWS ? false : -1);
       }
       this.barsPlayed = 0;
       this.energy = 0;
@@ -4205,52 +4243,57 @@ class TechnoSim {
 // ==========================================================================
 //  Modulo de juego: TECHNO GROOVEBOX
 //  Jam session P2P de musica electronica/techno.
-//  Host = Caja de ritmos 909 (canales 0-3).
-//  Guest = Bajo acido 303 (canales 4-7) + Pad XY filtro.
+//  Host = Caja de ritmos 909 (canales drum). Guest = Bajo acido 303 x4 +
+//  Sinte + Piano + Guitarra (canales de melodia) + Pad XY de filtro.
 //  Audio 100% sintetizado con Web Audio API. Cero samples.
+//
+//  RED: el host y el guest corren CADA UNO su propio reloj de secuenciador
+//  (TechnoSim) en su maquina, avanzando localmente cuadro a cuadro. Por la
+//  red SOLO viajan ediciones (que ficha se prendio/apago, mute, bpm, filtro,
+//  nota) y una correccion de fase de baja frecuencia ("clk"). El audio de
+//  cada maquina se dispara siempre desde SU PROPIO reloj local — nunca al
+//  recibir un paquete — asi no se corta ni se desfasa con el jitter de red.
+//
 //  Usa los globales del shell: cv, ctx, net.
 // ==========================================================================
 (function () {
   // ---- constantes de layout ----
-  const W = 820, H = 520;
+  const W = 880, H = 700;
   const SCOPE_H = 60;
   const HEADER_H = 32;
   const GRID_TOP = SCOPE_H + HEADER_H + 4;
   const CELL_W = 42, CELL_H = 28, CELL_GAP = 3;
   const LABEL_W = 64;
   const GRID_X = LABEL_W + 8;
-  const DRUM_ROWS = 4, BASS_ROWS = 4;
+  const DRUM_ROWS = TECHNO.DRUM_ROWS, MELODY_ROWS = TECHNO.MELODY_ROWS;
   const SEPARATOR_Y = GRID_TOP + DRUM_ROWS * (CELL_H + CELL_GAP) + 6;
-  const BASS_TOP = SEPARATOR_Y + 6;
-  const CONTROL_TOP = BASS_TOP + BASS_ROWS * (CELL_H + CELL_GAP) + 12;
+  const MELODY_TOP = SEPARATOR_Y + 6;
+  const CONTROL_TOP = MELODY_TOP + MELODY_ROWS * (CELL_H + CELL_GAP) + 12;
   const PAD_SIZE = 120;
   const PAD_X = W - PAD_SIZE - 24;
   const PAD_Y = CONTROL_TOP;
+  const NOTE_BTN_W = 100, NOTE_BTN_H = 24, NOTE_BTN_GAP = 3;
+  const CLK_INTERVALO = 0.5;   // seg entre correcciones de fase host->guest
 
   // ---- colores ----
   const COL_BG = "#0a0a0f";
   const COL_GRID_OFF = "#1a1a24";
   const COL_GRID_BORDER = "#2a2a3a";
   const COL_DRUM_ON = "#ff8c00";
-  const COL_DRUM_DIM = "#663800";
-  const COL_BASS_ON = "#00e5ff";
-  const COL_BASS_DIM = "#005566";
   const COL_PLAYHEAD = "#ffffff";
   const COL_SCOPE = "#00ff66";
   const COL_MUTED = "#333340";
   const COL_LABEL = "#888899";
   const COL_LABEL_OWN = "#ccccdd";
   const COL_HEADER = "#666677";
+  // un color por fila de melodia: BASS1-4 comparten el teal acido; sinte/piano/guitarra distintos
+  const COL_MELODY_ON = ["#00e5ff", "#00e5ff", "#00e5ff", "#00e5ff", "#c86bff", "#ffd25a", "#ff7a4a"];
+  const COL_MELODY_HI = ["#44eeff", "#44eeff", "#44eeff", "#44eeff", "#e0b3ff", "#ffe49a", "#ffb199"];
+  const COL_MELODY_DIM = ["#0a2a2e", "#0a2a2e", "#0a2a2e", "#0a2a2e", "#2a1a33", "#332a12", "#331e14"];
 
-  // ---- audio engine ----
-  let aCtx = null;
-  let analyser = null;
-  let analyserData = null;
-  let masterGain = null;
-
-  // Nodo de filtro persistente para el bajo 303
-  let bassFilter = null;
-  let bassDistortion = null;
+  // ---- audio engine (100% local a esta maquina) ----
+  let aCtx = null, analyser = null, analyserData = null, masterGain = null;
+  let bassFilter = null, bassDistortion = null;
 
   function initAudio() {
     if (aCtx) return;
@@ -4258,31 +4301,23 @@ class TechnoSim {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
       aCtx = new AC();
-
       masterGain = aCtx.createGain();
       masterGain.gain.value = 0.7;
-
       analyser = aCtx.createAnalyser();
       analyser.fftSize = 256;
       analyserData = new Uint8Array(analyser.frequencyBinCount);
-
       masterGain.connect(analyser);
       analyser.connect(aCtx.destination);
 
-      // Filtro 303 persistente
       bassFilter = aCtx.createBiquadFilter();
       bassFilter.type = "lowpass";
       bassFilter.frequency.value = TECHNO.CUT_DEF;
       bassFilter.Q.value = TECHNO.RES_DEF;
 
-      // Distorsion tanh para el acido
       bassDistortion = aCtx.createWaveShaper();
       const samples = 256;
       const curve = new Float32Array(samples);
-      for (let i = 0; i < samples; i++) {
-        const x = (i * 2) / samples - 1;
-        curve[i] = Math.tanh(x * 2.5);
-      }
+      for (let i = 0; i < samples; i++) { const x = (i * 2) / samples - 1; curve[i] = Math.tanh(x * 2.5); }
       bassDistortion.curve = curve;
       bassDistortion.oversample = "2x";
 
@@ -4290,48 +4325,34 @@ class TechnoSim {
       bassDistortion.connect(masterGain);
     } catch (e) {}
   }
-
-  function resumeAudio() {
-    if (aCtx && aCtx.state === "suspended") {
-      try { aCtx.resume(); } catch (e) {}
-    }
-  }
+  function resumeAudio() { if (aCtx && aCtx.state === "suspended") { try { aCtx.resume(); } catch (e) {} } }
 
   // ---- sintesis de drums 909 ----
   function playKick() {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
-      const osc = aCtx.createOscillator();
-      const gain = aCtx.createGain();
+      const osc = aCtx.createOscillator(), gain = aCtx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(150, now);
       osc.frequency.exponentialRampToValueAtTime(40, now + 0.08);
       gain.gain.setValueAtTime(0.9, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-      osc.connect(gain);
-      gain.connect(masterGain);
-      osc.start(now);
-      osc.stop(now + 0.36);
+      osc.connect(gain); gain.connect(masterGain);
+      osc.start(now); osc.stop(now + 0.36);
     } catch (e) {}
   }
-
   function playSnare() {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
-      // Tono
-      const osc = aCtx.createOscillator();
-      const oscGain = aCtx.createGain();
+      const osc = aCtx.createOscillator(), oscGain = aCtx.createGain();
       osc.type = "triangle";
       osc.frequency.setValueAtTime(200, now);
       oscGain.gain.setValueAtTime(0.45, now);
       oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-      osc.connect(oscGain);
-      oscGain.connect(masterGain);
-      osc.start(now);
-      osc.stop(now + 0.06);
-      // Ruido
+      osc.connect(oscGain); oscGain.connect(masterGain);
+      osc.start(now); osc.stop(now + 0.06);
       const bufLen = Math.floor(aCtx.sampleRate * 0.15);
       const buf = aCtx.createBuffer(1, bufLen, aCtx.sampleRate);
       const data = buf.getChannelData(0);
@@ -4339,19 +4360,14 @@ class TechnoSim {
       const noise = aCtx.createBufferSource();
       noise.buffer = buf;
       const nf = aCtx.createBiquadFilter();
-      nf.type = "bandpass";
-      nf.frequency.value = 3000;
-      nf.Q.value = 1.2;
+      nf.type = "bandpass"; nf.frequency.value = 3000; nf.Q.value = 1.2;
       const ng = aCtx.createGain();
       ng.gain.setValueAtTime(0.55, now);
       ng.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
-      noise.connect(nf);
-      nf.connect(ng);
-      ng.connect(masterGain);
+      noise.connect(nf); nf.connect(ng); ng.connect(masterGain);
       noise.start(now);
     } catch (e) {}
   }
-
   function playHat(open) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
@@ -4364,78 +4380,128 @@ class TechnoSim {
       const noise = aCtx.createBufferSource();
       noise.buffer = buf;
       const hpf = aCtx.createBiquadFilter();
-      hpf.type = "highpass";
-      hpf.frequency.value = open ? 6000 : 8000;
+      hpf.type = "highpass"; hpf.frequency.value = open ? 6000 : 8000;
       const gain = aCtx.createGain();
       gain.gain.setValueAtTime(open ? 0.28 : 0.22, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-      noise.connect(hpf);
-      hpf.connect(gain);
-      gain.connect(masterGain);
+      noise.connect(hpf); hpf.connect(gain); gain.connect(masterGain);
       noise.start(now);
     } catch (e) {}
   }
+  const drumFn = [playKick, playSnare, () => playHat(false), () => playHat(true)];
 
-  // ---- sintesis de bajo 303 ----
+  // ---- sintesis de bajo 303 (comparte el filtro persistente + distorsion) ----
   function playBass(freq, cutoff, resonance) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
-      const osc = aCtx.createOscillator();
-      const gain = aCtx.createGain();
+      const osc = aCtx.createOscillator(), gain = aCtx.createGain();
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(freq, now);
-
-      // Envelope del filtro (accent)
       bassFilter.frequency.cancelScheduledValues(now);
       bassFilter.frequency.setValueAtTime(cutoff * 1.8, now);
       bassFilter.frequency.exponentialRampToValueAtTime(Math.max(cutoff, 200), now + 0.12);
       bassFilter.Q.setValueAtTime(resonance, now);
-
       gain.gain.setValueAtTime(0.55, now);
       gain.gain.setValueAtTime(0.55, now + 0.005);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-
-      osc.connect(gain);
-      gain.connect(bassFilter);
-      osc.start(now);
-      osc.stop(now + 0.22);
+      osc.connect(gain); gain.connect(bassFilter);
+      osc.start(now); osc.stop(now + 0.22);
     } catch (e) {}
   }
 
-  const drumFn = [playKick, playSnare, () => playHat(false), () => playHat(true)];
-
-  // ---- estado del modulo ----
-  let sim = null;           // solo el host tiene sim
-  let localGrid = [];       // copia local del grid (para el guest)
-  let localStep = 0;
-  let localBpm = TECHNO.BPM_DEF;
-  let localMute = [];
-  let localCutoff = TECHNO.CUT_DEF;
-  let localRes = TECHNO.RES_DEF;
-  let localBassNotes = [0, 3, 4, 7];
-  let localPlaying = true;
-  let localBars = 0;
-  let hAcc = 0;             // acumulador host para step
-  let lastStepTriggered = -1;
-  let sendAcc = 0;
-
-  // Interaccion
-  let dragPad = false;
-  let hoverCell = null;     // {ch, s}
-  let noteSelector = null;  // {ch, visible}
-
-  // ---- funciones de input ----
-  function canvasPos(e) {
-    const r = cv.getBoundingClientRect();
-    return {
-      x: (e.clientX - r.left) * (W / r.width),
-      y: (e.clientY - r.top) * (H / r.height)
-    };
+  // ---- sintesis de sinte (lead con filtro propio, no comparte el del 303) ----
+  function playSynth(freq) {
+    if (!aCtx || RetroAudio.isMuted()) return;
+    try {
+      const now = aCtx.currentTime;
+      const filt = aCtx.createBiquadFilter();
+      filt.type = "lowpass";
+      filt.frequency.setValueAtTime(freq * 7, now);
+      filt.frequency.exponentialRampToValueAtTime(Math.max(freq * 1.6, 250), now + 0.16);
+      filt.Q.value = 5;
+      const gain = aCtx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.32, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+      filt.connect(gain); gain.connect(masterGain);
+      for (const det of [-6, 6]) {
+        const osc = aCtx.createOscillator();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(freq, now);
+        osc.detune.setValueAtTime(det, now);
+        osc.connect(filt);
+        osc.start(now); osc.stop(now + 0.3);
+      }
+    } catch (e) {}
   }
 
+  // ---- sintesis de piano (electrico: fundamental + parcial rapido tipo campana) ----
+  function playPiano(freq) {
+    if (!aCtx || RetroAudio.isMuted()) return;
+    try {
+      const now = aCtx.currentTime;
+      const g1 = aCtx.createGain();
+      g1.gain.setValueAtTime(0.0001, now);
+      g1.gain.exponentialRampToValueAtTime(0.45, now + 0.004);
+      g1.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+      g1.connect(masterGain);
+      const o1 = aCtx.createOscillator();
+      o1.type = "triangle"; o1.frequency.setValueAtTime(freq, now);
+      o1.connect(g1); o1.start(now); o1.stop(now + 0.95);
+
+      const g2 = aCtx.createGain();
+      g2.gain.setValueAtTime(0.0001, now);
+      g2.gain.exponentialRampToValueAtTime(0.16, now + 0.003);
+      g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+      g2.connect(masterGain);
+      const o2 = aCtx.createOscillator();
+      o2.type = "sine"; o2.frequency.setValueAtTime(freq * 2.01, now);
+      o2.connect(g2); o2.start(now); o2.stop(now + 0.35);
+    } catch (e) {}
+  }
+
+  // ---- sintesis de guitarra (pluck: banda pasante resonante + unisono leve) ----
+  function playGuitar(freq) {
+    if (!aCtx || RetroAudio.isMuted()) return;
+    try {
+      const now = aCtx.currentTime;
+      const bp = aCtx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = freq * 2.3; bp.Q.value = 3.2;
+      const gain = aCtx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.38, now + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+      bp.connect(gain); gain.connect(masterGain);
+      for (const det of [0, 7]) {
+        const osc = aCtx.createOscillator();
+        osc.type = "sawtooth"; osc.frequency.setValueAtTime(freq, now); osc.detune.setValueAtTime(det, now);
+        osc.connect(bp);
+        osc.start(now); osc.stop(now + 0.55);
+      }
+    } catch (e) {}
+  }
+
+  // fila de melodia (0-3 bajo, 4 sinte, 5 piano, 6 guitarra) -> funcion de sintesis
+  function playMelody(fila, freq, cutoff, resonance) {
+    if (fila < 4) playBass(freq, cutoff, resonance);
+    else if (fila === 4) playSynth(freq);
+    else if (fila === 5) playPiano(freq);
+    else playGuitar(freq);
+  }
+
+  // ---- estado del modulo: AMBOS roles tienen su propio reloj+grid local ----
+  let sim = null;
+  let clkAcc = 0;         // host: acumulador para mandar correccion de fase
+  let dragPad = false;
+  let hoverCell = null;
+
+  // ---- input: coords ----
+  function canvasPos(e) {
+    const r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+  }
   function gridHit(px, py) {
-    // Drums
     for (let ch = 0; ch < DRUM_ROWS; ch++) {
       const y = GRID_TOP + ch * (CELL_H + CELL_GAP);
       if (py >= y && py < y + CELL_H) {
@@ -4445,10 +4511,9 @@ class TechnoSim {
         }
       }
     }
-    // Bass
-    for (let i = 0; i < BASS_ROWS; i++) {
-      const ch = i + 4;
-      const y = BASS_TOP + i * (CELL_H + CELL_GAP);
+    for (let i = 0; i < MELODY_ROWS; i++) {
+      const ch = i + DRUM_ROWS;
+      const y = MELODY_TOP + i * (CELL_H + CELL_GAP);
       if (py >= y && py < y + CELL_H) {
         for (let s = 0; s < TECHNO.PASOS; s++) {
           const x = GRID_X + s * (CELL_W + CELL_GAP);
@@ -4458,152 +4523,103 @@ class TechnoSim {
     }
     return null;
   }
-
-  function padHit(px, py) {
-    return px >= PAD_X && px < PAD_X + PAD_SIZE && py >= PAD_Y && py < PAD_Y + PAD_SIZE;
-  }
-
+  function padHit(px, py) { return px >= PAD_X && px < PAD_X + PAD_SIZE && py >= PAD_Y && py < PAD_Y + PAD_SIZE; }
   function labelHit(px, py) {
-    // Click en label = mute
     for (let ch = 0; ch < DRUM_ROWS; ch++) {
       const y = GRID_TOP + ch * (CELL_H + CELL_GAP);
       if (py >= y && py < y + CELL_H && px < GRID_X) return ch;
     }
-    for (let i = 0; i < BASS_ROWS; i++) {
-      const y = BASS_TOP + i * (CELL_H + CELL_GAP);
-      if (py >= y && py < y + CELL_H && px < GRID_X) return i + 4;
+    for (let i = 0; i < MELODY_ROWS; i++) {
+      const y = MELODY_TOP + i * (CELL_H + CELL_GAP);
+      if (py >= y && py < y + CELL_H && px < GRID_X) return i + DRUM_ROWS;
+    }
+    return -1;
+  }
+  function noteAreaHit(px, py) {
+    const btnY = CONTROL_TOP, startX = LABEL_W + 8;
+    if (py >= btnY && py < btnY + MELODY_ROWS * (NOTE_BTN_H + NOTE_BTN_GAP)) {
+      for (let i = 0; i < MELODY_ROWS; i++) {
+        const by = btnY + i * (NOTE_BTN_H + NOTE_BTN_GAP);
+        if (py >= by && py < by + NOTE_BTN_H && px >= startX && px < startX + NOTE_BTN_W) return i + DRUM_ROWS;
+      }
     }
     return -1;
   }
 
-  function noteAreaHit(px, py) {
-    // Area de seleccion de nota (debajo del pad o botones de nota)
-    const btnY = CONTROL_TOP;
-    const btnH = 26;
-    const btnW = 50;
-    const startX = LABEL_W + 8;
-    if (py >= btnY && py < btnY + btnH * 4 + 12) {
-      for (let i = 0; i < 4; i++) {
-        const by = btnY + i * (btnH + 3);
-        if (py >= by && py < by + btnH && px >= startX && px < startX + btnW * 3 + 8) {
-          // Cycle through notes
-          return i + 4;
-        }
-      }
-    }
-    return -1;
+  // ---- helpers de red: aplicar localmente + mandar el VALOR resultante ----
+  // (mandar el valor ya resuelto, no un "toggle" ciego, evita que un paquete
+  // perdido en el canal no confiable deje los dos tableros desincronizados)
+  function editarPaso(ch, s) {
+    sim.toggleStep(ch, s);
+    net.enviar(JSON.stringify({ t: "tog", ch, s, val: sim.grid[ch][s] }));
+  }
+  function editarMute(ch) {
+    sim.toggleMute(ch);
+    net.enviar(JSON.stringify({ t: "mut", ch, val: sim.mute[ch] }));
   }
 
   // ---- handlers ----
   function onPointerDown(e) {
-    resumeAudio();
-    initAudio();
+    resumeAudio(); initAudio();
+    if (!sim) return;
     const p = canvasPos(e);
 
-    // Pad XY (solo guest)
     if (padHit(p.x, p.y)) {
-      if (net.rol === 2) {
-        dragPad = true;
-        updatePad(p.x, p.y);
-      }
+      if (net.rol === 2) { dragPad = true; updatePad(p.x, p.y); }
       return;
     }
-
-    // Grid click
     const hit = gridHit(p.x, p.y);
     if (hit) {
-      // Host puede editar ch 0-3, Guest ch 4-7
-      const canEdit = (net.rol === 1 && hit.ch < 4) || (net.rol === 2 && hit.ch >= 4);
-      if (canEdit) {
-        if (sim) sim.toggleStep(hit.ch, hit.s);
-        else {
-          // Guest: toggle local y enviar
-          if (hit.ch >= 4) {
-            const noteIdx = localBassNotes[hit.ch - 4];
-            localGrid[hit.ch][hit.s] = localGrid[hit.ch][hit.s] === -1 ? noteIdx : -1;
-          }
-        }
-        net.enviar(JSON.stringify({ t: "tog", ch: hit.ch, s: hit.s }));
-      }
+      const canEdit = (net.rol === 1 && hit.ch < DRUM_ROWS) || (net.rol === 2 && hit.ch >= DRUM_ROWS);
+      if (canEdit) editarPaso(hit.ch, hit.s);
       return;
     }
-
-    // Label click = mute
     const lblCh = labelHit(p.x, p.y);
     if (lblCh >= 0) {
-      if (sim) sim.toggleMute(lblCh);
-      else localMute[lblCh] = !localMute[lblCh];
-      net.enviar(JSON.stringify({ t: "mut", ch: lblCh }));
+      const canEdit = (net.rol === 1 && lblCh < DRUM_ROWS) || (net.rol === 2 && lblCh >= DRUM_ROWS);
+      if (canEdit) editarMute(lblCh);
       return;
     }
-
-    // Note selector area (solo guest)
     if (net.rol === 2) {
       const nch = noteAreaHit(p.x, p.y);
       if (nch >= 0) {
-        const bassIdx = nch - 4;
-        const current = localBassNotes[bassIdx];
-        const next = (current + 1) % TECHNO.NOTAS.length;
-        localBassNotes[bassIdx] = next;
-        // Actualizar pasos activos
-        for (let s = 0; s < TECHNO.PASOS; s++) {
-          if (localGrid[nch][s] !== -1) localGrid[nch][s] = next;
-        }
+        const idx = nch - DRUM_ROWS;
+        const next = (sim.melodyNotes[idx] + 1) % TECHNO.NOTAS.length;
+        sim.setNote(nch, next);
         net.enviar(JSON.stringify({ t: "note", ch: nch, ni: next }));
       }
     }
   }
-
   function onPointerMove(e) {
     const p = canvasPos(e);
-    if (dragPad && net.rol === 2) {
-      updatePad(p.x, p.y);
-      return;
-    }
+    if (dragPad && net.rol === 2) { updatePad(p.x, p.y); return; }
     hoverCell = gridHit(p.x, p.y);
   }
-
-  function onPointerUp() {
-    dragPad = false;
-  }
-
+  function onPointerUp() { dragPad = false; }
   function updatePad(px, py) {
+    if (!sim) return;
     const nx = clamp((px - PAD_X) / PAD_SIZE, 0, 1);
     const ny = clamp(1 - (py - PAD_Y) / PAD_SIZE, 0, 1);
     const cut = TECHNO.CUT_MIN + nx * (TECHNO.CUT_MAX - TECHNO.CUT_MIN);
     const res = TECHNO.RES_MIN + ny * (TECHNO.RES_MAX - TECHNO.RES_MIN);
-    localCutoff = cut;
-    localRes = res;
-    if (bassFilter) {
-      bassFilter.frequency.value = cut;
-      bassFilter.Q.value = res;
-    }
-    net.enviar(JSON.stringify({ t: "flt", cut: Math.round(cut), res: Math.round(res * 10) / 10 }));
+    sim.setFilter(cut, res);
+    if (bassFilter) { bassFilter.frequency.value = sim.cutoff; bassFilter.Q.value = sim.resonance; }
+    net.enviar(JSON.stringify({ t: "flt", cut: Math.round(sim.cutoff), res: Math.round(sim.resonance * 10) / 10 }));
   }
-
   function onKeyDown(e) {
-    // BPM: +/- (solo host)
+    if (!sim) return;
     if (net.rol === 1) {
-      if (e.key === "+" || e.key === "=") {
-        if (sim) sim.setBpm(sim.bpm + 1);
-        net.enviar(JSON.stringify({ t: "bpm", bpm: sim ? sim.bpm : localBpm }));
-        e.preventDefault();
-      } else if (e.key === "-" || e.key === "_") {
-        if (sim) sim.setBpm(sim.bpm - 1);
-        net.enviar(JSON.stringify({ t: "bpm", bpm: sim ? sim.bpm : localBpm }));
-        e.preventDefault();
-      }
+      if (e.key === "+" || e.key === "=") { sim.setBpm(sim.bpm + 1); net.enviar(JSON.stringify({ t: "bpm", bpm: sim.bpm })); e.preventDefault(); return; }
+      if (e.key === "-" || e.key === "_") { sim.setBpm(sim.bpm - 1); net.enviar(JSON.stringify({ t: "bpm", bpm: sim.bpm })); e.preventDefault(); return; }
     }
-    // Mute rapido 1-8
-    const n = parseInt(e.key);
-    if (n >= 1 && n <= 8) {
+    // Mute rapido: teclas 1-9 cubren los primeros 9 canales (falta GUITAR, fila 11)
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= 9) {
       const ch = n - 1;
-      if (sim) sim.toggleMute(ch);
-      else localMute[ch] = !localMute[ch];
-      net.enviar(JSON.stringify({ t: "mut", ch }));
+      const canEdit = (net.rol === 1 && ch < DRUM_ROWS) || (net.rol === 2 && ch >= DRUM_ROWS && ch < TECHNO.CANALES);
+      if (canEdit) editarMute(ch);
     }
   }
-
   function hookInput() {
     cv.addEventListener("pointerdown", onPointerDown);
     cv.addEventListener("pointermove", onPointerMove);
@@ -4619,465 +4635,208 @@ class TechnoSim {
     window.removeEventListener("keydown", onKeyDown);
   }
 
-  // ---- trigger audio en step ----
-  function triggerStep(step, grid, mute, cutoff, resonance, bassNotes) {
-    // Drums
-    for (let ch = 0; ch < 4; ch++) {
-      if (!mute[ch] && grid[ch][step]) drumFn[ch]();
+  // ---- disparo de audio: SIEMPRE local, llamado por el reloj propio ----
+  function triggerStep(step, s) {
+    for (let ch = 0; ch < DRUM_ROWS; ch++) {
+      if (!s.mute[ch] && s.grid[ch][step]) drumFn[ch]();
     }
-    // Bass
-    for (let i = 0; i < 4; i++) {
-      const ch = i + 4;
-      if (!mute[ch] && grid[ch][step] !== -1) {
-        const noteIdx = grid[ch][step];
-        const nota = TECHNO.NOTAS[noteIdx];
-        if (nota) playBass(nota.hz, cutoff, resonance);
-      }
+    for (let i = 0; i < MELODY_ROWS; i++) {
+      const ch = i + DRUM_ROWS;
+      if (s.mute[ch]) continue;
+      const val = s.grid[ch][step];
+      if (val === -1) continue;
+      const nota = TECHNO.NOTAS[val];
+      if (nota) playMelody(i, nota.hz, s.cutoff, s.resonance);
     }
   }
 
   // ---- render ----
-  function render(now, dt) {
-    const g = sim ? sim.grid : localGrid;
-    const step = sim ? sim.currentStep : localStep;
-    const bpm = sim ? sim.bpm : localBpm;
-    const mute = sim ? sim.mute : localMute;
-    const cut = sim ? sim.cutoff : localCutoff;
-    const res = sim ? sim.resonance : localRes;
-    const bNotes = sim ? sim.bassNotes : localBassNotes;
-    const bars = sim ? sim.barsPlayed : localBars;
+  function render(now) {
+    const s = sim;
+    ctx.fillStyle = COL_BG; ctx.fillRect(0, 0, W, H);
+    if (!s) return;
 
-    ctx.fillStyle = COL_BG;
-    ctx.fillRect(0, 0, W, H);
-
-    // ---- osciloscopio ----
     if (analyser && analyserData) {
       analyser.getByteTimeDomainData(analyserData);
-      ctx.strokeStyle = COL_SCOPE;
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = COL_SCOPE; ctx.lineWidth = 1.5;
       ctx.beginPath();
       const sliceW = W / analyserData.length;
       for (let i = 0; i < analyserData.length; i++) {
-        const v = analyserData[i] / 128.0;
-        const y = (v * SCOPE_H) / 2;
-        if (i === 0) ctx.moveTo(0, y);
-        else ctx.lineTo(i * sliceW, y);
+        const v = analyserData[i] / 128.0, y = (v * SCOPE_H) / 2;
+        if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * sliceW, y);
       }
       ctx.stroke();
     }
-    // Linea base del osciloscopio
-    ctx.strokeStyle = "#1a2a1a";
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(0, SCOPE_H / 2);
-    ctx.lineTo(W, SCOPE_H / 2);
-    ctx.stroke();
+    ctx.strokeStyle = "#1a2a1a"; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, SCOPE_H / 2); ctx.lineTo(W, SCOPE_H / 2); ctx.stroke();
 
-    // ---- header: BPM + info ----
-    ctx.fillStyle = COL_HEADER;
-    ctx.font = "bold 13px ui-monospace, monospace";
-    ctx.textAlign = "left";
-    ctx.fillText("BPM", 8, SCOPE_H + 18);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(bpm.toString(), 42, SCOPE_H + 18);
+    ctx.font = "bold 13px ui-monospace, monospace"; ctx.textAlign = "left";
+    ctx.fillStyle = COL_HEADER; ctx.fillText("BPM", 8, SCOPE_H + 18);
+    ctx.fillStyle = "#fff"; ctx.fillText(s.bpm.toString(), 42, SCOPE_H + 18);
+    ctx.fillStyle = COL_HEADER; ctx.fillText("STEP", 90, SCOPE_H + 18);
+    ctx.fillStyle = "#fff"; ctx.fillText((s.currentStep + 1).toString().padStart(2, "0") + "/" + TECHNO.PASOS, 130, SCOPE_H + 18);
+    ctx.fillStyle = COL_HEADER; ctx.fillText("BAR", 200, SCOPE_H + 18);
+    ctx.fillStyle = "#fff"; ctx.fillText(s.barsPlayed.toString(), 230, SCOPE_H + 18);
 
-    ctx.fillStyle = COL_HEADER;
-    ctx.fillText("STEP", 90, SCOPE_H + 18);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText((step + 1).toString().padStart(2, "0"), 130, SCOPE_H + 18);
+    const rolTxt = net.rol === 1 ? "HOST  🥁 DRUMS" : "GUEST  🎹 MELODÍA";
+    ctx.fillStyle = net.rol === 1 ? COL_DRUM_ON : COL_MELODY_ON[0];
+    ctx.textAlign = "right"; ctx.fillText(rolTxt, W - 8, SCOPE_H + 18); ctx.textAlign = "left";
 
-    ctx.fillStyle = COL_HEADER;
-    ctx.fillText("BAR", 170, SCOPE_H + 18);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(bars.toString(), 200, SCOPE_H + 18);
-
-    const rolTxt = net.rol === 1 ? "HOST  🥁 DRUMS" : "GUEST  🎹 BASS";
-    ctx.fillStyle = net.rol === 1 ? COL_DRUM_ON : COL_BASS_ON;
-    ctx.textAlign = "right";
-    ctx.fillText(rolTxt, W - 8, SCOPE_H + 18);
-    ctx.textAlign = "left";
-
-    // ---- grid de drums ----
+    // grid de drums
     for (let ch = 0; ch < DRUM_ROWS; ch++) {
       const y = GRID_TOP + ch * (CELL_H + CELL_GAP);
-      const isMuted = mute[ch];
-      const isOwn = net.rol === 1;
-
-      // Label
+      const isMuted = s.mute[ch], isOwn = net.rol === 1;
       ctx.fillStyle = isMuted ? COL_MUTED : (isOwn ? COL_LABEL_OWN : COL_LABEL);
       ctx.font = "bold 11px ui-monospace, monospace";
       ctx.fillText(TECHNO.NOMBRES_CANAL[ch], 6, y + 18);
-
-      // Mute indicator
-      if (isMuted) {
-        ctx.fillStyle = "#ff3333";
-        ctx.font = "bold 9px ui-monospace, monospace";
-        ctx.fillText("M", LABEL_W - 8, y + 10);
-      }
-
-      for (let s = 0; s < TECHNO.PASOS; s++) {
-        const x = GRID_X + s * (CELL_W + CELL_GAP);
-        const on = g[ch] && g[ch][s];
-        const isPlayhead = s === step;
-
-        // Fondo celda
-        if (isMuted) {
-          ctx.fillStyle = COL_MUTED;
-        } else if (on) {
-          ctx.fillStyle = isPlayhead ? "#ffbb44" : COL_DRUM_ON;
-        } else {
-          ctx.fillStyle = isPlayhead ? "#2a2a1a" : COL_GRID_OFF;
-        }
+      if (isMuted) { ctx.fillStyle = "#ff3333"; ctx.font = "bold 9px ui-monospace, monospace"; ctx.fillText("M", LABEL_W - 8, y + 10); }
+      for (let st = 0; st < TECHNO.PASOS; st++) {
+        const x = GRID_X + st * (CELL_W + CELL_GAP);
+        const on = s.grid[ch] && s.grid[ch][st];
+        const isPh = st === s.currentStep;
+        ctx.fillStyle = isMuted ? COL_MUTED : on ? (isPh ? "#ffbb44" : COL_DRUM_ON) : (isPh ? "#2a2a1a" : COL_GRID_OFF);
         ctx.fillRect(x, y, CELL_W, CELL_H);
-
-        // Borde
-        ctx.strokeStyle = isPlayhead ? COL_PLAYHEAD : COL_GRID_BORDER;
-        ctx.lineWidth = isPlayhead ? 1.5 : 0.5;
+        ctx.strokeStyle = isPh ? COL_PLAYHEAD : COL_GRID_BORDER; ctx.lineWidth = isPh ? 1.5 : 0.5;
         ctx.strokeRect(x, y, CELL_W, CELL_H);
-
-        // Beat markers (cada 4)
-        if (s % 4 === 0) {
-          ctx.fillStyle = "#444455";
-          ctx.fillRect(x, y, 2, CELL_H);
-        }
+        if (st % 4 === 0) { ctx.fillStyle = "#444455"; ctx.fillRect(x, y, 2, CELL_H); }
       }
     }
 
-    // ---- separador ----
-    ctx.strokeStyle = "#333344";
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(GRID_X, SEPARATOR_Y);
-    ctx.lineTo(GRID_X + TECHNO.PASOS * (CELL_W + CELL_GAP), SEPARATOR_Y);
-    ctx.stroke();
+    ctx.strokeStyle = "#333344"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(GRID_X, SEPARATOR_Y); ctx.lineTo(GRID_X + TECHNO.PASOS * (CELL_W + CELL_GAP), SEPARATOR_Y); ctx.stroke();
     ctx.setLineDash([]);
 
-    // ---- grid de bass ----
-    for (let i = 0; i < BASS_ROWS; i++) {
-      const ch = i + 4;
-      const y = BASS_TOP + i * (CELL_H + CELL_GAP);
-      const isMuted = mute[ch];
-      const isOwn = net.rol === 2;
-      const noteIdx = bNotes[i];
+    // grid de melodia
+    for (let i = 0; i < MELODY_ROWS; i++) {
+      const ch = i + DRUM_ROWS;
+      const y = MELODY_TOP + i * (CELL_H + CELL_GAP);
+      const isMuted = s.mute[ch], isOwn = net.rol === 2;
+      const noteIdx = s.melodyNotes[i];
       const noteName = TECHNO.NOTAS[noteIdx] ? TECHNO.NOTAS[noteIdx].nombre : "?";
-
-      // Label con nombre de nota
       ctx.fillStyle = isMuted ? COL_MUTED : (isOwn ? COL_LABEL_OWN : COL_LABEL);
-      ctx.font = "bold 11px ui-monospace, monospace";
-      ctx.fillText(noteName, 6, y + 18);
-
-      if (isMuted) {
-        ctx.fillStyle = "#ff3333";
-        ctx.font = "bold 9px ui-monospace, monospace";
-        ctx.fillText("M", LABEL_W - 8, y + 10);
-      }
-
-      for (let s = 0; s < TECHNO.PASOS; s++) {
-        const x = GRID_X + s * (CELL_W + CELL_GAP);
-        const val = g[ch] ? g[ch][s] : -1;
-        const on = val !== -1;
-        const isPlayhead = s === step;
-
-        if (isMuted) {
-          ctx.fillStyle = COL_MUTED;
-        } else if (on) {
-          ctx.fillStyle = isPlayhead ? "#44eeff" : COL_BASS_ON;
-        } else {
-          ctx.fillStyle = isPlayhead ? "#1a2a2a" : COL_GRID_OFF;
-        }
+      ctx.font = "bold 10px ui-monospace, monospace";
+      ctx.fillText(TECHNO.NOMBRES_CANAL[ch] + " " + noteName, 4, y + 18);
+      if (isMuted) { ctx.fillStyle = "#ff3333"; ctx.font = "bold 9px ui-monospace, monospace"; ctx.fillText("M", LABEL_W - 8, y + 10); }
+      for (let st = 0; st < TECHNO.PASOS; st++) {
+        const x = GRID_X + st * (CELL_W + CELL_GAP);
+        const val = s.grid[ch] ? s.grid[ch][st] : -1;
+        const on = val !== -1, isPh = st === s.currentStep;
+        ctx.fillStyle = isMuted ? COL_MUTED : on ? (isPh ? COL_MELODY_HI[i] : COL_MELODY_ON[i]) : (isPh ? COL_MELODY_DIM[i] : COL_GRID_OFF);
         ctx.fillRect(x, y, CELL_W, CELL_H);
-
-        ctx.strokeStyle = isPlayhead ? COL_PLAYHEAD : COL_GRID_BORDER;
-        ctx.lineWidth = isPlayhead ? 1.5 : 0.5;
+        ctx.strokeStyle = isPh ? COL_PLAYHEAD : COL_GRID_BORDER; ctx.lineWidth = isPh ? 1.5 : 0.5;
         ctx.strokeRect(x, y, CELL_W, CELL_H);
-
-        // Mostrar nombre de nota en celda activa
         if (on && !isMuted) {
           const n = TECHNO.NOTAS[val];
-          if (n) {
-            ctx.fillStyle = "#000000";
-            ctx.font = "bold 9px ui-monospace, monospace";
-            ctx.textAlign = "center";
-            ctx.fillText(n.nombre, x + CELL_W / 2, y + 18);
-            ctx.textAlign = "left";
-          }
+          if (n) { ctx.fillStyle = "#000"; ctx.font = "bold 9px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.fillText(n.nombre, x + CELL_W / 2, y + 18); ctx.textAlign = "left"; }
         }
-
-        if (s % 4 === 0) {
-          ctx.fillStyle = "#444455";
-          ctx.fillRect(x, y, 2, CELL_H);
-        }
+        if (st % 4 === 0) { ctx.fillStyle = "#444455"; ctx.fillRect(x, y, 2, CELL_H); }
       }
     }
 
-    // ---- pad XY (filtro 303) ----
-    // Fondo del pad
-    ctx.fillStyle = "#111118";
-    ctx.fillRect(PAD_X, PAD_Y, PAD_SIZE, PAD_SIZE);
-    ctx.strokeStyle = net.rol === 2 ? COL_BASS_ON : "#333344";
-    ctx.lineWidth = 1.5;
+    // pad XY (filtro 303 — solo afecta a los canales de bajo)
+    ctx.fillStyle = "#111118"; ctx.fillRect(PAD_X, PAD_Y, PAD_SIZE, PAD_SIZE);
+    ctx.strokeStyle = net.rol === 2 ? COL_MELODY_ON[0] : "#333344"; ctx.lineWidth = 1.5;
     ctx.strokeRect(PAD_X, PAD_Y, PAD_SIZE, PAD_SIZE);
-
-    // Ejes
-    ctx.strokeStyle = "#2a2a3a";
-    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = "#2a2a3a"; ctx.lineWidth = 0.5;
     ctx.beginPath();
-    ctx.moveTo(PAD_X + PAD_SIZE / 2, PAD_Y);
-    ctx.lineTo(PAD_X + PAD_SIZE / 2, PAD_Y + PAD_SIZE);
-    ctx.moveTo(PAD_X, PAD_Y + PAD_SIZE / 2);
-    ctx.lineTo(PAD_X + PAD_SIZE, PAD_Y + PAD_SIZE / 2);
+    ctx.moveTo(PAD_X + PAD_SIZE / 2, PAD_Y); ctx.lineTo(PAD_X + PAD_SIZE / 2, PAD_Y + PAD_SIZE);
+    ctx.moveTo(PAD_X, PAD_Y + PAD_SIZE / 2); ctx.lineTo(PAD_X + PAD_SIZE, PAD_Y + PAD_SIZE / 2);
     ctx.stroke();
-
-    // Punto de posicion
-    const padNx = (cut - TECHNO.CUT_MIN) / (TECHNO.CUT_MAX - TECHNO.CUT_MIN);
-    const padNy = 1 - (res - TECHNO.RES_MIN) / (TECHNO.RES_MAX - TECHNO.RES_MIN);
-    const dotX = PAD_X + padNx * PAD_SIZE;
-    const dotY = PAD_Y + padNy * PAD_SIZE;
-    ctx.fillStyle = COL_BASS_ON;
-    ctx.beginPath();
-    ctx.arc(dotX, dotY, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Labels del pad
-    ctx.fillStyle = COL_HEADER;
-    ctx.font = "9px ui-monospace, monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("CUTOFF", PAD_X + PAD_SIZE / 2, PAD_Y + PAD_SIZE + 12);
-    ctx.save();
-    ctx.translate(PAD_X - 6, PAD_Y + PAD_SIZE / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText("RESO", 0, 0);
-    ctx.restore();
+    const padNx = (s.cutoff - TECHNO.CUT_MIN) / (TECHNO.CUT_MAX - TECHNO.CUT_MIN);
+    const padNy = 1 - (s.resonance - TECHNO.RES_MIN) / (TECHNO.RES_MAX - TECHNO.RES_MIN);
+    const dotX = PAD_X + padNx * PAD_SIZE, dotY = PAD_Y + padNy * PAD_SIZE;
+    ctx.fillStyle = COL_MELODY_ON[0]; ctx.beginPath(); ctx.arc(dotX, dotY, 6, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(dotX, dotY, 2.5, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = COL_HEADER; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "center";
+    ctx.fillText("CUTOFF (bajo)", PAD_X + PAD_SIZE / 2, PAD_Y + PAD_SIZE + 12);
+    ctx.save(); ctx.translate(PAD_X - 6, PAD_Y + PAD_SIZE / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("RESO", 0, 0); ctx.restore();
     ctx.textAlign = "left";
+    ctx.fillStyle = COL_MELODY_ON[0]; ctx.font = "bold 10px ui-monospace, monospace";
+    ctx.fillText("CUT " + Math.round(s.cutoff) + " Hz", PAD_X, PAD_Y + PAD_SIZE + 24);
+    ctx.fillText("RES " + s.resonance.toFixed(1), PAD_X + 80, PAD_Y + PAD_SIZE + 24);
 
-    // Valores del filtro
-    ctx.fillStyle = COL_BASS_ON;
-    ctx.font = "bold 10px ui-monospace, monospace";
-    ctx.fillText("CUT " + Math.round(cut) + " Hz", PAD_X, PAD_Y + PAD_SIZE + 24);
-    ctx.fillText("RES " + res.toFixed(1), PAD_X + 80, PAD_Y + PAD_SIZE + 24);
-
-    // ---- note selectors (guest) ----
+    // selectores de nota (guest, un boton por fila de melodia)
     if (net.rol === 2) {
-      const btnY = CONTROL_TOP;
-      const btnH = 24;
       const startX = LABEL_W + 8;
       ctx.font = "bold 10px ui-monospace, monospace";
-      for (let i = 0; i < 4; i++) {
-        const by = btnY + i * (btnH + 3);
-        const noteIdx = localBassNotes[i];
+      for (let i = 0; i < MELODY_ROWS; i++) {
+        const by = CONTROL_TOP + i * (NOTE_BTN_H + NOTE_BTN_GAP);
+        const noteIdx = s.melodyNotes[i];
         const nota = TECHNO.NOTAS[noteIdx];
-        ctx.fillStyle = "#1a1a24";
-        ctx.fillRect(startX, by, 90, btnH);
-        ctx.strokeStyle = COL_BASS_DIM;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(startX, by, 90, btnH);
-        ctx.fillStyle = COL_BASS_ON;
-        ctx.fillText("CH" + (i + 5) + " ► " + (nota ? nota.nombre : "?"), startX + 6, by + 16);
+        ctx.fillStyle = "#1a1a24"; ctx.fillRect(startX, by, NOTE_BTN_W, NOTE_BTN_H);
+        ctx.strokeStyle = COL_MELODY_DIM[i]; ctx.lineWidth = 1; ctx.strokeRect(startX, by, NOTE_BTN_W, NOTE_BTN_H);
+        ctx.fillStyle = COL_MELODY_ON[i];
+        ctx.fillText(TECHNO.NOMBRES_CANAL[i + DRUM_ROWS] + " ► " + (nota ? nota.nombre : "?"), startX + 6, by + 16);
       }
     }
 
-    // ---- playhead pulse indicator (top) ----
     const pulse = Math.sin(now / 100) * 0.3 + 0.7;
-    const phX = GRID_X + step * (CELL_W + CELL_GAP);
+    const phX = GRID_X + s.currentStep * (CELL_W + CELL_GAP);
     ctx.fillStyle = "rgba(255,255,255," + (pulse * 0.15).toFixed(2) + ")";
-    ctx.fillRect(phX, GRID_TOP, CELL_W, DRUM_ROWS * (CELL_H + CELL_GAP) + 12 + BASS_ROWS * (CELL_H + CELL_GAP));
+    ctx.fillRect(phX, GRID_TOP, CELL_W, DRUM_ROWS * (CELL_H + CELL_GAP) + 12 + MELODY_ROWS * (CELL_H + CELL_GAP));
   }
 
   // ---- modulo JUEGOS.techno ----
   JUEGOS.techno = {
     nombre: "Techno Jam",
-    desc: "Groovebox P2P — Host: Drums 909 · Guest: Bass 303 Ácido",
+    desc: "Groovebox P2P — Host: Drums 909 · Guest: Bajo 303 + Sinte + Piano + Guitarra",
     canvas: { w: W, h: H },
 
     iniciarHost() {
-      initAudio();
-      resumeAudio();
+      initAudio(); resumeAudio();
       sim = new TechnoSim();
-      localGrid = sim.grid;
-      localMute = sim.mute;
-      localBassNotes = sim.bassNotes;
-      localBpm = sim.bpm;
-      localCutoff = sim.cutoff;
-      localRes = sim.resonance;
-      localStep = 0;
-      localBars = 0;
-      hAcc = 0;
-      sendAcc = 0;
-      lastStepTriggered = -1;
+      clkAcc = 0;
       hookInput();
     },
-
     iniciarGuest() {
-      initAudio();
-      resumeAudio();
-      sim = null;
-      localGrid = [];
-      for (let ch = 0; ch < TECHNO.CANALES; ch++) {
-        localGrid[ch] = new Array(TECHNO.PASOS).fill(ch < 4 ? false : -1);
-      }
-      // Patron kick basico
-      localGrid[0][0] = true; localGrid[0][4] = true;
-      localGrid[0][8] = true; localGrid[0][12] = true;
-      localGrid[2][0] = true; localGrid[2][2] = true;
-      localGrid[2][4] = true; localGrid[2][6] = true;
-      localGrid[2][8] = true; localGrid[2][10] = true;
-      localGrid[2][12] = true; localGrid[2][14] = true;
-      localMute = new Array(TECHNO.CANALES).fill(false);
-      localBassNotes = [0, 3, 4, 7];
-      localBpm = TECHNO.BPM_DEF;
-      localCutoff = TECHNO.CUT_DEF;
-      localRes = TECHNO.RES_DEF;
-      localStep = 0;
-      localBars = 0;
-      hAcc = 0;
-      lastStepTriggered = -1;
+      initAudio(); resumeAudio();
+      sim = new TechnoSim();   // reloj propio e independiente: nunca depende de la red para sonar
+      clkAcc = 0;
       hookInput();
     },
-
     destruir() {
       unhookInput();
-      sim = null;
-      dragPad = false;
-      hoverCell = null;
+      sim = null; dragPad = false; hoverCell = null;
     },
 
     onData(msg) {
-      if (!msg || typeof msg !== "object") return;
-
-      if (msg.t === "e") {
-        // Snapshot del host
-        if (msg.grid) localGrid = msg.grid;
-        if (msg.mute) localMute = msg.mute;
-        if (typeof msg.bpm === "number") localBpm = msg.bpm;
-        if (typeof msg.cut === "number") {
-          localCutoff = msg.cut;
-          if (bassFilter) bassFilter.frequency.value = msg.cut;
-        }
-        if (typeof msg.res === "number") {
-          localRes = msg.res;
-          if (bassFilter) bassFilter.Q.value = msg.res;
-        }
-        if (msg.notes) localBassNotes = msg.notes;
-        if (typeof msg.playing === "boolean") localPlaying = msg.playing;
-        if (typeof msg.bars === "number") localBars = msg.bars;
-
-        // Sincronizar step y disparar audio
-        if (typeof msg.step === "number" && msg.step !== localStep) {
-          localStep = msg.step;
-          if (localStep !== lastStepTriggered) {
-            lastStepTriggered = localStep;
-            triggerStep(localStep, localGrid, localMute, localCutoff, localRes, localBassNotes);
-          }
-        }
-        return;
-      }
-
-      if (msg.t === "tog") {
-        // Toggle paso
-        if (sim) {
-          sim.toggleStep(msg.ch, msg.s);
-        } else {
-          const ch = msg.ch;
-          const s = msg.s;
-          if (ch < 4) {
-            localGrid[ch][s] = !localGrid[ch][s];
-          } else {
-            const noteIdx = localBassNotes[ch - 4];
-            localGrid[ch][s] = localGrid[ch][s] === -1 ? noteIdx : -1;
-          }
-        }
-        return;
-      }
-
-      if (msg.t === "mut") {
-        if (sim) sim.toggleMute(msg.ch);
-        else localMute[msg.ch] = !localMute[msg.ch];
-        return;
-      }
-
-      if (msg.t === "bpm") {
-        if (sim) sim.setBpm(msg.bpm);
-        localBpm = msg.bpm;
-        return;
-      }
-
+      if (!msg || typeof msg !== "object" || !sim) return;
+      if (msg.t === "tog") { sim.setStepValue(msg.ch, msg.s, msg.val); return; }
+      if (msg.t === "mut") { sim.setMuteValue(msg.ch, msg.val); return; }
+      if (msg.t === "bpm") { sim.setBpm(msg.bpm); return; }
       if (msg.t === "flt") {
-        if (sim) sim.setFilter(msg.cut, msg.res);
-        localCutoff = msg.cut;
-        localRes = msg.res;
-        if (bassFilter) {
-          bassFilter.frequency.value = msg.cut;
-          bassFilter.Q.value = msg.res;
-        }
+        sim.setFilter(msg.cut, msg.res);
+        if (bassFilter) { bassFilter.frequency.value = sim.cutoff; bassFilter.Q.value = sim.resonance; }
         return;
       }
+      if (msg.t === "note") { sim.setNote(msg.ch, msg.ni); return; }
+      if (msg.t === "clk") { if (net.rol === 2) sim.resyncFromHost(msg.step, msg.acc, msg.bpm); return; }
+      if (msg.t === "rev") { sim.pedirRevancha(msg.who === 1 || msg.who === 2 ? msg.who : (net.rol === 1 ? 2 : 1)); return; }
+    },
 
-      if (msg.t === "note") {
-        if (sim) sim.setNote(msg.ch, msg.ni);
-        else {
-          const bassIdx = msg.ch - 4;
-          if (bassIdx >= 0 && bassIdx < 4) {
-            localBassNotes[bassIdx] = msg.ni;
-            for (let s = 0; s < TECHNO.PASOS; s++) {
-              if (localGrid[msg.ch][s] !== -1) localGrid[msg.ch][s] = msg.ni;
-            }
+    // Reloj y audio: SIEMPRE locales. La red solo aporta ediciones + una
+    // correccion de fase de baja frecuencia (ver header del archivo).
+    frame(now, dt, pausado) {
+      if (sim && !pausado) {
+        sim.step(dt);
+        if (sim.stepTriggered) triggerStep(sim.currentStep, sim);
+        if (net.rol === 1) {
+          clkAcc += dt;
+          if (clkAcc >= CLK_INTERVALO) {
+            clkAcc = 0;
+            net.enviar(JSON.stringify({ t: "clk", step: sim.currentStep, acc: Math.round(sim.acc * 1000) / 1000, bpm: sim.bpm }));
           }
         }
-        return;
       }
-
-      if (msg.t === "rev") {
-        if (sim) sim.pedirRevancha(2);
-        return;
-      }
+      render(now);
     },
 
-    frame(now, dt, pausado) {
-      if (pausado) {
-        render(now, dt);
-        return;
-      }
-
-      if (sim) {
-        // Host: avanzar simulacion
-        sim.step(dt);
-        if (sim.stepTriggered) {
-          triggerStep(sim.currentStep, sim.grid, sim.mute, sim.cutoff, sim.resonance, sim.bassNotes);
-          // Enviar snapshot al guest en cada step
-          net.enviar(JSON.stringify(sim.snapshot()));
-        }
-        localStep = sim.currentStep;
-        localBpm = sim.bpm;
-        localBars = sim.barsPlayed;
-        localCutoff = sim.cutoff;
-        localRes = sim.resonance;
-      } else {
-        // Guest: reloj local para interpolacion visual
-        hAcc += dt;
-        const dur = 60 / localBpm / 4;
-        if (hAcc >= dur) {
-          hAcc -= dur;
-          if (hAcc > dur) hAcc = 0;
-          // No avanzamos el step localmente, esperamos el snapshot del host
-        }
-      }
-
-      render(now, dt);
-    },
-
-    overlay() {
-      // En modo jam no hay overlay de victoria/derrota
-      return null;
-    },
+    overlay() { return null; }, // jam libre: sin victoria/derrota
 
     revancha() {
-      if (net.rol === 1 && sim) sim.pedirRevancha(1);
-      else net.enviar(JSON.stringify({ t: "rev" }));
+      if (!sim) return;
+      sim.pedirRevancha(net.rol);
+      net.enviar(JSON.stringify({ t: "rev", who: net.rol }));
     },
   };
 })();

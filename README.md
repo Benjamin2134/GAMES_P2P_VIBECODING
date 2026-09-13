@@ -14,6 +14,11 @@ Arcade multijugador retro 100% P2P (Peer-to-Peer a 120 Hz) sin servidor intermed
 4. ⚓ **BATTLESHIP:** Batalla naval 10x10 con niebla de guerra y radar de sonar.
 5. 🏍️ **CYBER TRON:** Motos de luz en arena expandida (1000x600 px), giros en 90°, estelas y turbo boost.
 6. 🎲 **MONOPOLY DUEL:** Duelo inmobiliario en tablero de 24 casillas, dados, compras, casas y bancarrota.
+7. 🎛️ **TECHNO JAM:** Groovebox P2P — secuenciador de 17 pasos x 11 canales. Host: caja de ritmos 909
+   (kick/snare/hats). Guest: bajo ácido 303 (x4) + **sinte, piano y guitarra** + pad XY de filtro.
+   Audio 100% sintetizado (Web Audio, cero samples). El reloj corre **local e independiente en cada
+   máquina**: la red solo sincroniza qué ficha está prendida, nunca el audio — así no se corta ni se
+   desfasa por el jitter de la conexión.
 
 ---
 
