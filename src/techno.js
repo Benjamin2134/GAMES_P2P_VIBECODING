@@ -33,6 +33,10 @@
   const NOTE_BTN_W = 100, NOTE_BTN_H = 24, NOTE_BTN_GAP = 3;
   const CLK_INTERVALO = 0.5;   // seg entre correcciones de fase host->guest
 
+  // panel de mezcla (knobs de volumen + EQ del canal seleccionado)
+  const MIX_X = 200, MIX_Y = CONTROL_TOP, KNOB_R = 16, KNOB_GAP = 46;
+  const KNOB_DRAG_RANGO = 130; // px de arrastre vertical para recorrer todo el rango del knob
+
   // ---- colores ----
   const COL_BG = "#0a0a0f";
   const COL_GRID_OFF = "#1a1a24";
@@ -52,6 +56,30 @@
   // ---- audio engine (100% local a esta maquina) ----
   let aCtx = null, analyser = null, analyserData = null, masterGain = null;
   let bassFilter = null, bassDistortion = null;
+  // Un "channel strip" por canal: gain (volumen) -> low-shelf -> high-shelf.
+  // El de bajo (4-7) desemboca en el filtro acido compartido; el resto va
+  // directo al master. Asi cada canal tiene sus propios knobs de vol/EQ.
+  let channelChain = [];
+
+  function construirCanal(ch) {
+    const gain = aCtx.createGain();
+    const low = aCtx.createBiquadFilter();
+    low.type = "lowshelf"; low.frequency.value = 200; low.gain.value = 0;
+    const high = aCtx.createBiquadFilter();
+    high.type = "highshelf"; high.frequency.value = 4000; high.gain.value = 0;
+    gain.connect(low); low.connect(high);
+    high.connect(ch >= 4 && ch <= 7 ? bassFilter : masterGain);
+    return { gain, low, high };
+  }
+  function aplicarMezcla(ch) {
+    const c = channelChain[ch];
+    if (!c || !sim) return;
+    c.gain.gain.value = sim.vol[ch];
+    c.low.gain.value = sim.eqLow[ch];
+    c.high.gain.value = sim.eqHigh[ch];
+  }
+  function aplicarMezclaTodo() { for (let ch = 0; ch < TECHNO.CANALES; ch++) aplicarMezcla(ch); }
+  function destinoDe(ch) { return channelChain[ch] ? channelChain[ch].gain : masterGain; }
 
   function initAudio() {
     if (aCtx) return;
@@ -81,12 +109,18 @@
 
       bassFilter.connect(bassDistortion);
       bassDistortion.connect(masterGain);
+
+      channelChain = [];
+      for (let ch = 0; ch < TECHNO.CANALES; ch++) channelChain[ch] = construirCanal(ch);
     } catch (e) {}
   }
   function resumeAudio() { if (aCtx && aCtx.state === "suspended") { try { aCtx.resume(); } catch (e) {} } }
 
   // ---- sintesis de drums 909 ----
-  function playKick() {
+  // Todas las voces reciben "dest": el gain de ENTRADA al channel strip de su
+  // canal (volumen + EQ propios), no el master directo — asi los knobs por
+  // canal afectan a esa voz.
+  function playKick(dest) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
@@ -96,11 +130,11 @@
       osc.frequency.exponentialRampToValueAtTime(40, now + 0.08);
       gain.gain.setValueAtTime(0.9, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-      osc.connect(gain); gain.connect(masterGain);
+      osc.connect(gain); gain.connect(dest);
       osc.start(now); osc.stop(now + 0.36);
     } catch (e) {}
   }
-  function playSnare() {
+  function playSnare(dest) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
@@ -109,7 +143,7 @@
       osc.frequency.setValueAtTime(200, now);
       oscGain.gain.setValueAtTime(0.45, now);
       oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-      osc.connect(oscGain); oscGain.connect(masterGain);
+      osc.connect(oscGain); oscGain.connect(dest);
       osc.start(now); osc.stop(now + 0.06);
       const bufLen = Math.floor(aCtx.sampleRate * 0.15);
       const buf = aCtx.createBuffer(1, bufLen, aCtx.sampleRate);
@@ -122,11 +156,11 @@
       const ng = aCtx.createGain();
       ng.gain.setValueAtTime(0.55, now);
       ng.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
-      noise.connect(nf); nf.connect(ng); ng.connect(masterGain);
+      noise.connect(nf); nf.connect(ng); ng.connect(dest);
       noise.start(now);
     } catch (e) {}
   }
-  function playHat(open) {
+  function playHat(open, dest) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
@@ -142,14 +176,19 @@
       const gain = aCtx.createGain();
       gain.gain.setValueAtTime(open ? 0.28 : 0.22, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-      noise.connect(hpf); hpf.connect(gain); gain.connect(masterGain);
+      noise.connect(hpf); hpf.connect(gain); gain.connect(dest);
       noise.start(now);
     } catch (e) {}
   }
-  const drumFn = [playKick, playSnare, () => playHat(false), () => playHat(true)];
+  const drumFn = [
+    (dest) => playKick(dest),
+    (dest) => playSnare(dest),
+    (dest) => playHat(false, dest),
+    (dest) => playHat(true, dest),
+  ];
 
-  // ---- sintesis de bajo 303 (comparte el filtro persistente + distorsion) ----
-  function playBass(freq, cutoff, resonance) {
+  // ---- sintesis de bajo 303 (comparte el filtro/distorsion acido despues del channel strip) ----
+  function playBass(freq, cutoff, resonance, dest) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
@@ -163,13 +202,13 @@
       gain.gain.setValueAtTime(0.55, now);
       gain.gain.setValueAtTime(0.55, now + 0.005);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-      osc.connect(gain); gain.connect(bassFilter);
+      osc.connect(gain); gain.connect(dest);
       osc.start(now); osc.stop(now + 0.22);
     } catch (e) {}
   }
 
   // ---- sintesis de sinte (lead con filtro propio, no comparte el del 303) ----
-  function playSynth(freq) {
+  function playSynth(freq, dest) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
@@ -182,7 +221,7 @@
       gain.gain.setValueAtTime(0.0001, now);
       gain.gain.exponentialRampToValueAtTime(0.32, now + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
-      filt.connect(gain); gain.connect(masterGain);
+      filt.connect(gain); gain.connect(dest);
       for (const det of [-6, 6]) {
         const osc = aCtx.createOscillator();
         osc.type = "sawtooth";
@@ -195,7 +234,7 @@
   }
 
   // ---- sintesis de piano (electrico: fundamental + parcial rapido tipo campana) ----
-  function playPiano(freq) {
+  function playPiano(freq, dest) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
@@ -203,7 +242,7 @@
       g1.gain.setValueAtTime(0.0001, now);
       g1.gain.exponentialRampToValueAtTime(0.45, now + 0.004);
       g1.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
-      g1.connect(masterGain);
+      g1.connect(dest);
       const o1 = aCtx.createOscillator();
       o1.type = "triangle"; o1.frequency.setValueAtTime(freq, now);
       o1.connect(g1); o1.start(now); o1.stop(now + 0.95);
@@ -212,7 +251,7 @@
       g2.gain.setValueAtTime(0.0001, now);
       g2.gain.exponentialRampToValueAtTime(0.16, now + 0.003);
       g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
-      g2.connect(masterGain);
+      g2.connect(dest);
       const o2 = aCtx.createOscillator();
       o2.type = "sine"; o2.frequency.setValueAtTime(freq * 2.01, now);
       o2.connect(g2); o2.start(now); o2.stop(now + 0.35);
@@ -220,7 +259,7 @@
   }
 
   // ---- sintesis de guitarra (pluck: banda pasante resonante + unisono leve) ----
-  function playGuitar(freq) {
+  function playGuitar(freq, dest) {
     if (!aCtx || RetroAudio.isMuted()) return;
     try {
       const now = aCtx.currentTime;
@@ -230,7 +269,7 @@
       gain.gain.setValueAtTime(0.0001, now);
       gain.gain.linearRampToValueAtTime(0.38, now + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-      bp.connect(gain); gain.connect(masterGain);
+      bp.connect(gain); gain.connect(dest);
       for (const det of [0, 7]) {
         const osc = aCtx.createOscillator();
         osc.type = "sawtooth"; osc.frequency.setValueAtTime(freq, now); osc.detune.setValueAtTime(det, now);
@@ -241,11 +280,11 @@
   }
 
   // fila de melodia (0-3 bajo, 4 sinte, 5 piano, 6 guitarra) -> funcion de sintesis
-  function playMelody(fila, freq, cutoff, resonance) {
-    if (fila < 4) playBass(freq, cutoff, resonance);
-    else if (fila === 4) playSynth(freq);
-    else if (fila === 5) playPiano(freq);
-    else playGuitar(freq);
+  function playMelody(fila, freq, cutoff, resonance, dest) {
+    if (fila < 4) playBass(freq, cutoff, resonance, dest);
+    else if (fila === 4) playSynth(freq, dest);
+    else if (fila === 5) playPiano(freq, dest);
+    else playGuitar(freq, dest);
   }
 
   // ---- estado del modulo: AMBOS roles tienen su propio reloj+grid local ----
@@ -253,6 +292,8 @@
   let clkAcc = 0;         // host: acumulador para mandar correccion de fase
   let dragPad = false;
   let hoverCell = null;
+  let selectedChannel = null;  // canal elegido (click derecho) para mostrar sus knobs
+  let dragKnob = null;         // {which:"vol"|"low"|"high", startY, startVal}
 
   // ---- input: coords ----
   function canvasPos(e) {
@@ -303,6 +344,53 @@
     }
     return -1;
   }
+  // fila (canal) sobre la que esta (x,y), sin importar la columna — para
+  // elegir con click derecho que canal mezclar
+  function rowAtY(py) {
+    for (let ch = 0; ch < DRUM_ROWS; ch++) {
+      const y = GRID_TOP + ch * (CELL_H + CELL_GAP);
+      if (py >= y && py < y + CELL_H) return ch;
+    }
+    for (let i = 0; i < MELODY_ROWS; i++) {
+      const y = MELODY_TOP + i * (CELL_H + CELL_GAP);
+      if (py >= y && py < y + CELL_H) return i + DRUM_ROWS;
+    }
+    return -1;
+  }
+  function puedoEditarCanal(ch) {
+    return (net.rol === 1 && ch >= 0 && ch < DRUM_ROWS) || (net.rol === 2 && ch >= DRUM_ROWS && ch < TECHNO.CANALES);
+  }
+  function knobCenters() {
+    const y = MIX_Y + 40;
+    return {
+      vol: { x: MIX_X + KNOB_R, y },
+      low: { x: MIX_X + KNOB_R + KNOB_GAP, y },
+      high: { x: MIX_X + KNOB_R + KNOB_GAP * 2, y },
+    };
+  }
+  function knobHit(px, py) {
+    if (selectedChannel === null) return null;
+    const kc = knobCenters();
+    for (const k of ["vol", "low", "high"]) {
+      if (Math.hypot(px - kc[k].x, py - kc[k].y) <= KNOB_R + 5) return k;
+    }
+    return null;
+  }
+  function valorKnob(which, ch) {
+    if (which === "vol") return sim.vol[ch];
+    if (which === "low") return sim.eqLow[ch];
+    return sim.eqHigh[ch];
+  }
+  function rangoKnob(which) {
+    return which === "vol" ? [TECHNO.VOL_MIN, TECHNO.VOL_MAX] : [TECHNO.EQ_MIN, TECHNO.EQ_MAX];
+  }
+  function fijarKnob(which, ch, v) {
+    if (which === "vol") sim.setVol(ch, v);
+    else if (which === "low") sim.setEqLow(ch, v);
+    else sim.setEqHigh(ch, v);
+    aplicarMezcla(ch);
+    net.enviar(JSON.stringify({ t: "mix", ch, vol: sim.vol[ch], low: sim.eqLow[ch], high: sim.eqHigh[ch] }));
+  }
 
   // ---- helpers de red: aplicar localmente + mandar el VALOR resultante ----
   // (mandar el valor ya resuelto, no un "toggle" ciego, evita que un paquete
@@ -322,6 +410,11 @@
     if (!sim) return;
     const p = canvasPos(e);
 
+    const kh = knobHit(p.x, p.y);
+    if (kh !== null && puedoEditarCanal(selectedChannel)) {
+      dragKnob = { which: kh, startY: p.y, startVal: valorKnob(kh, selectedChannel) };
+      return;
+    }
     if (padHit(p.x, p.y)) {
       if (net.rol === 2) { dragPad = true; updatePad(p.x, p.y); }
       return;
@@ -350,10 +443,24 @@
   }
   function onPointerMove(e) {
     const p = canvasPos(e);
+    if (dragKnob) {
+      const [lo, hi] = rangoKnob(dragKnob.which);
+      const dy = dragKnob.startY - p.y; // arrastrar hacia arriba sube el valor
+      const v = clamp(dragKnob.startVal + (dy / KNOB_DRAG_RANGO) * (hi - lo), lo, hi);
+      fijarKnob(dragKnob.which, selectedChannel, v);
+      return;
+    }
     if (dragPad && net.rol === 2) { updatePad(p.x, p.y); return; }
     hoverCell = gridHit(p.x, p.y);
   }
-  function onPointerUp() { dragPad = false; }
+  function onPointerUp() { dragPad = false; dragKnob = null; }
+  function onContextMenu(e) {
+    e.preventDefault();
+    if (!sim) return;
+    const p = canvasPos(e);
+    const ch = rowAtY(p.y);
+    if (ch >= 0 && puedoEditarCanal(ch)) selectedChannel = ch;
+  }
   function updatePad(px, py) {
     if (!sim) return;
     const nx = clamp((px - PAD_X) / PAD_SIZE, 0, 1);
@@ -383,6 +490,7 @@
     cv.addEventListener("pointermove", onPointerMove);
     cv.addEventListener("pointerup", onPointerUp);
     cv.addEventListener("pointerleave", onPointerUp);
+    cv.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("keydown", onKeyDown);
   }
   function unhookInput() {
@@ -390,13 +498,14 @@
     cv.removeEventListener("pointermove", onPointerMove);
     cv.removeEventListener("pointerup", onPointerUp);
     cv.removeEventListener("pointerleave", onPointerUp);
+    cv.removeEventListener("contextmenu", onContextMenu);
     window.removeEventListener("keydown", onKeyDown);
   }
 
   // ---- disparo de audio: SIEMPRE local, llamado por el reloj propio ----
   function triggerStep(step, s) {
     for (let ch = 0; ch < DRUM_ROWS; ch++) {
-      if (!s.mute[ch] && s.grid[ch][step]) drumFn[ch]();
+      if (!s.mute[ch] && s.grid[ch][step]) drumFn[ch](destinoDe(ch));
     }
     for (let i = 0; i < MELODY_ROWS; i++) {
       const ch = i + DRUM_ROWS;
@@ -404,8 +513,28 @@
       const val = s.grid[ch][step];
       if (val === -1) continue;
       const nota = TECHNO.NOTAS[val];
-      if (nota) playMelody(i, nota.hz, s.cutoff, s.resonance);
+      if (nota) playMelody(i, nota.hz, s.cutoff, s.resonance, destinoDe(ch));
     }
+  }
+
+  // dibuja un knob rotativo: t01 en [0,1] = posicion actual dentro del rango
+  function dibujarKnob(cx, cy, t01, label, valTxt, activo) {
+    t01 = clamp(t01, 0, 1);
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25; // barrido de -135° a +135°
+    const ang = a0 + t01 * (a1 - a0);
+    ctx.beginPath(); ctx.arc(cx, cy, KNOB_R, 0, 6.2832);
+    ctx.fillStyle = activo ? "#171722" : "#101014"; ctx.fill();
+    ctx.strokeStyle = "#3a3a4a"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, KNOB_R - 3, a0, ang);
+    ctx.strokeStyle = activo ? COL_MELODY_ON[4] : COL_MUTED; ctx.lineWidth = 3; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(ang) * (KNOB_R - 4), cy + Math.sin(ang) * (KNOB_R - 4));
+    ctx.strokeStyle = activo ? "#fff" : "#666"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.fillStyle = COL_HEADER; ctx.font = "8px ui-monospace, monospace";
+    ctx.fillText(label, cx, cy + KNOB_R + 11);
+    ctx.fillStyle = activo ? "#ccc" : "#555"; ctx.fillText(valTxt, cx, cy + KNOB_R + 22);
+    ctx.textAlign = "left"; ctx.font = "bold 10px ui-monospace, monospace";
   }
 
   // ---- render ----
@@ -528,6 +657,23 @@
       }
     }
 
+    // panel de mezcla: knobs de volumen + EQ del canal elegido con click derecho
+    ctx.font = "bold 10px ui-monospace, monospace"; ctx.textAlign = "left";
+    if (selectedChannel === null) {
+      ctx.fillStyle = COL_HEADER;
+      ctx.fillText("Click derecho en tu canal", MIX_X, MIX_Y - 2);
+      ctx.fillText("para ver Volumen + EQ", MIX_X, MIX_Y + 11);
+    } else {
+      const ch = selectedChannel;
+      const esMio = puedoEditarCanal(ch);
+      ctx.fillStyle = esMio ? "#fff" : COL_MUTED;
+      ctx.fillText(TECHNO.NOMBRES_CANAL[ch] + (esMio ? "" : " (del rival)"), MIX_X, MIX_Y - 2);
+      const kc = knobCenters();
+      dibujarKnob(kc.vol.x, kc.vol.y, (s.vol[ch] - TECHNO.VOL_MIN) / (TECHNO.VOL_MAX - TECHNO.VOL_MIN), "VOL", Math.round(s.vol[ch] * 100) + "%", esMio);
+      dibujarKnob(kc.low.x, kc.low.y, (s.eqLow[ch] - TECHNO.EQ_MIN) / (TECHNO.EQ_MAX - TECHNO.EQ_MIN), "LOW", (s.eqLow[ch] >= 0 ? "+" : "") + Math.round(s.eqLow[ch]) + "dB", esMio);
+      dibujarKnob(kc.high.x, kc.high.y, (s.eqHigh[ch] - TECHNO.EQ_MIN) / (TECHNO.EQ_MAX - TECHNO.EQ_MIN), "HIGH", (s.eqHigh[ch] >= 0 ? "+" : "") + Math.round(s.eqHigh[ch]) + "dB", esMio);
+    }
+
     const pulse = Math.sin(now / 100) * 0.3 + 0.7;
     const phX = GRID_X + s.currentStep * (CELL_W + CELL_GAP);
     ctx.fillStyle = "rgba(255,255,255," + (pulse * 0.15).toFixed(2) + ")";
@@ -543,18 +689,20 @@
     iniciarHost() {
       initAudio(); resumeAudio();
       sim = new TechnoSim();
-      clkAcc = 0;
+      aplicarMezclaTodo();
+      clkAcc = 0; selectedChannel = null; dragKnob = null;
       hookInput();
     },
     iniciarGuest() {
       initAudio(); resumeAudio();
       sim = new TechnoSim();   // reloj propio e independiente: nunca depende de la red para sonar
-      clkAcc = 0;
+      aplicarMezclaTodo();
+      clkAcc = 0; selectedChannel = null; dragKnob = null;
       hookInput();
     },
     destruir() {
       unhookInput();
-      sim = null; dragPad = false; hoverCell = null;
+      sim = null; dragPad = false; hoverCell = null; selectedChannel = null; dragKnob = null;
     },
 
     onData(msg) {
@@ -568,6 +716,11 @@
         return;
       }
       if (msg.t === "note") { sim.setNote(msg.ch, msg.ni); return; }
+      if (msg.t === "mix") {
+        sim.setVol(msg.ch, msg.vol); sim.setEqLow(msg.ch, msg.low); sim.setEqHigh(msg.ch, msg.high);
+        aplicarMezcla(msg.ch);
+        return;
+      }
       if (msg.t === "clk") { if (net.rol === 2) sim.resyncFromHost(msg.step, msg.acc, msg.bpm); return; }
       if (msg.t === "rev") { sim.pedirRevancha(msg.who === 1 || msg.who === 2 ? msg.who : (net.rol === 1 ? 2 : 1)); return; }
     },
@@ -589,7 +742,7 @@
       render(now);
     },
 
-    overlay() { return null; }, // jam libre: sin victoria/derrota
+      overlay() { return null; }, // jam libre: sin victoria/derrota
 
     revancha() {
       if (!sim) return;

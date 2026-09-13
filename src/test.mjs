@@ -252,11 +252,27 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   ts2.setFilter(3000, 15);
   t("techno: filtro acepta valores validos", ts2.cutoff === 3000 && ts2.resonance === 15);
 
-  // Nota
-  ts2.setNote(4, 5);
-  t("techno: setNote cambia melodyNotes", ts2.melodyNotes[0] === 5);
+  // Nota: una vez puesta en un paso, queda FIJA en ese tono aunque despues
+  // cambies la nota "actual" del canal para seguir componiendo.
+  ts2.toggleStep(4, 0);                 // prende el paso 0 con la nota actual (indice 0 = C2)
+  const notaFijadaEnPaso0 = ts2.grid[4][0];
+  ts2.setNote(4, 5);                    // cambio la nota del canal para lo que siga
+  t("techno: cambiar la nota del canal NO reescribe pasos ya puestos", ts2.grid[4][0] === notaFijadaEnPaso0);
+  t("techno: setNote cambia melodyNotes (para el proximo paso)", ts2.melodyNotes[0] === 5);
+  ts2.toggleStep(4, 1);                 // un paso nuevo SI usa la nota recien elegida
+  t("techno: un paso nuevo usa la nota actual del canal", ts2.grid[4][1] === 5);
+  t("techno: el paso viejo sigue con su nota original", ts2.grid[4][0] === notaFijadaEnPaso0 && notaFijadaEnPaso0 !== 5);
   ts2.setNote(0, 3); // fuera de rango (ch < 4)
   t("techno: setNote ignora canales drum", true); // no crash
+
+  // Mezcla por canal: volumen + EQ (knobs), clampeados
+  t("techno: vol/eqLow/eqHigh arrancan neutros", ts2.vol[4] === A.TECHNO.VOL_DEF && ts2.eqLow[4] === 0 && ts2.eqHigh[4] === 0);
+  ts2.setVol(4, 2); t("techno: setVol clampea al maximo", ts2.vol[4] === A.TECHNO.VOL_MAX);
+  ts2.setVol(4, -1); t("techno: setVol clampea al minimo", ts2.vol[4] === A.TECHNO.VOL_MIN);
+  ts2.setVol(4, 1.2); t("techno: setVol acepta un valor valido", ts2.vol[4] === 1.2);
+  ts2.setEqLow(0, 99); t("techno: setEqLow clampea", ts2.eqLow[0] === A.TECHNO.EQ_MAX);
+  ts2.setEqHigh(0, -99); t("techno: setEqHigh clampea", ts2.eqHigh[0] === A.TECHNO.EQ_MIN);
+  t("techno: la mezcla es POR CANAL (no afecta a otros)", ts2.vol[5] === A.TECHNO.VOL_DEF && ts2.eqLow[1] === 0);
 
   // Mute
   t("techno: canal 0 no muteado", ts2.mute[0] === false);

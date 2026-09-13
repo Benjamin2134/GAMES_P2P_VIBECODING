@@ -25,6 +25,9 @@ const TECHNO = {
   RES_MIN: 0.5,
   RES_MAX: 30,
   RES_DEF: 8,
+  // Mezcla por canal: volumen + EQ de 2 bandas (knobs)
+  VOL_MIN: 0, VOL_MAX: 1.5, VOL_DEF: 1,
+  EQ_MIN: -12, EQ_MAX: 12, EQ_DEF: 0,
   // Escala de Do menor (frecuencias Hz) para los canales melodicos
   NOTAS: [
     { nombre: "C2",  hz: 65.41 },
@@ -75,6 +78,12 @@ class TechnoSim {
     // Nota por defecto de cada canal melodico (indice en TECHNO.NOTAS)
     // [BASS1, BASS2, BASS3, BASS4, SYNTH, PIANO, GUITAR]
     this.melodyNotes = [0, 3, 4, 7, 2, 6, 9];
+
+    // Mezcla por canal (knobs): volumen + EQ de 2 bandas. Se guarda en el
+    // propio canal (no es un ajuste global) y viaja por red con "mix".
+    this.vol = new Array(TECHNO.CANALES).fill(TECHNO.VOL_DEF);
+    this.eqLow = new Array(TECHNO.CANALES).fill(TECHNO.EQ_DEF);
+    this.eqHigh = new Array(TECHNO.CANALES).fill(TECHNO.EQ_DEF);
 
     this.gameMode = "jam";
     this.energy = 0;
@@ -146,14 +155,14 @@ class TechnoSim {
     this.grid[ch][paso] = val;
   }
 
+  // Cambia la nota "actual" del canal: la que se va a usar para la PROXIMA
+  // ficha que se prenda. A proposito NO toca los pasos ya prendidos — una
+  // vez que pusiste una nota en un paso, esa nota queda fija ahi (no cambia
+  // si despues elegis otra nota para seguir componiendo).
   setNote(ch, noteIdx) {
     if (ch < TECHNO.DRUM_ROWS || ch >= TECHNO.CANALES) return;
     if (noteIdx < 0 || noteIdx >= TECHNO.NOTAS.length) return;
-    const idx = ch - TECHNO.DRUM_ROWS;
-    this.melodyNotes[idx] = noteIdx;
-    for (let s = 0; s < TECHNO.PASOS; s++) {
-      if (this.grid[ch][s] !== -1) this.grid[ch][s] = noteIdx;
-    }
+    this.melodyNotes[ch - TECHNO.DRUM_ROWS] = noteIdx;
   }
 
   setFilter(cut, res) {
@@ -174,6 +183,20 @@ class TechnoSim {
     this.mute[ch] = !!val;
   }
 
+  // ---- mezcla por canal: volumen + EQ de 2 bandas (knobs) ----
+  setVol(ch, v) {
+    if (ch < 0 || ch >= TECHNO.CANALES) return;
+    this.vol[ch] = clamp(v, TECHNO.VOL_MIN, TECHNO.VOL_MAX);
+  }
+  setEqLow(ch, db) {
+    if (ch < 0 || ch >= TECHNO.CANALES) return;
+    this.eqLow[ch] = clamp(db, TECHNO.EQ_MIN, TECHNO.EQ_MAX);
+  }
+  setEqHigh(ch, db) {
+    if (ch < 0 || ch >= TECHNO.CANALES) return;
+    this.eqHigh[ch] = clamp(db, TECHNO.EQ_MIN, TECHNO.EQ_MAX);
+  }
+
   // Snapshot solo para diagnostico/tests; la red NO usa esto para el audio
   // (ver arriba). Se deja liviano por si se necesita en el futuro.
   snapshot() {
@@ -186,6 +209,7 @@ class TechnoSim {
       cut: Math.round(this.cutoff),
       res: Math.round(this.resonance * 10) / 10,
       notes: this.melodyNotes,
+      vol: this.vol, eqLow: this.eqLow, eqHigh: this.eqHigh,
       playing: this.playing,
       bars: this.barsPlayed,
       seq: this.seq,
