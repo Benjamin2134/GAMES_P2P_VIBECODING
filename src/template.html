@@ -4,99 +4,629 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>GAMES P2P</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Urbanist:wght@400;500;600;700;800&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
+  :root {
+    color-scheme: dark;
+    --bg: #0f0f10;
+    --panel-bg: #18181a;
+    --border: #2a2a2c;
+    --text: #f0f0f0;
+    --text-muted: #9a9a9a;
+    --accent: #f4b944;
+    --accent-hover: #ffd15c;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
   body {
-    font-family: system-ui, -apple-system, sans-serif; background: #0b0d12; color: #e8ecf1;
-    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
-    align-items: center; gap: 16px; padding: 22px 12px;
+    font-family: 'Urbanist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
   }
-  h1 { font-size: 1rem; letter-spacing: 5px; margin: 0; font-weight: 800; opacity: .9; }
-  .panel {
-    background: #12151d; border: 1px solid #262b36; border-radius: 12px;
-    padding: 20px; width: min(520px, 96vw); display: flex; flex-direction: column; gap: 14px;
+
+  h1, h2, h3, .brand {
+    font-family: 'Unbounded', 'Urbanist', sans-serif;
+    letter-spacing: -0.02em;
   }
-  .sub { font-size: .85rem; color: #8b93a3; line-height: 1.5; }
-  .err { color: #e05a5a; }
+
+  .mono-label {
+    font-family: 'Orbitron', 'Urbanist', monospace, sans-serif;
+    letter-spacing: 1px;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+  a:hover {
+    color: var(--accent-hover);
+  }
+
+  /* Fondo dinámico drift */
+  @keyframes drift {
+    0% { transform: translate(0, 0); }
+    50% { transform: translate(2%, 3%); }
+    100% { transform: translate(0, 0); }
+  }
+  .bg-glow {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .bg-glow::before, .bg-glow::after {
+    content: '';
+    position: absolute;
+    width: 60vw;
+    height: 60vw;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: 0.12;
+    animation: drift 18s ease-in-out infinite;
+  }
+  .bg-glow::before {
+    background: var(--accent);
+    top: -15%;
+    left: -10%;
+  }
+  .bg-glow::after {
+    background: var(--accent);
+    bottom: -20%;
+    right: -15%;
+    animation-delay: -9s;
+  }
+
   .oculto { display: none !important; }
-  hr { border: none; border-top: 1px solid #262b36; width: 100%; margin: 2px 0; }
+  .err { color: #f87171; font-weight: 500; }
 
-  input, button { font-size: 1rem; padding: 10px 14px; border-radius: 8px; border: 1px solid #3a3f4b;
-    background: #171a22; color: #e8ecf1; font-family: inherit; }
-  button { cursor: pointer; font-weight: 600; }
-  button.primario { background: #2f6feb; border-color: #2f6feb; }
-  button:hover:not(:disabled) { filter: brightness(1.12); }
-  button:disabled { opacity: .45; cursor: default; }
-  .fila { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  #inputCodigo { flex: 1; min-width: 130px; text-transform: uppercase; letter-spacing: 3px; }
+  /* Header */
+  .app-header {
+    padding: 36px 24px 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .brand {
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    cursor: pointer;
+  }
+  .brand .dot {
+    color: var(--accent);
+  }
 
-  #listaJuegos { display: flex; flex-direction: column; gap: 10px; }
-  .juegoBtn { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left;
-    padding: 14px 16px; background: #1a1f2b; border-color: #313a4b; }
-  .juegoBtn b { font-size: 1.05rem; }
-  .juegoBtn span { font-size: .8rem; color: #97a0b2; font-weight: 400; }
+  /* Container */
+  .container {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
 
-  .codigo { font-size: 2rem; font-weight: 800; letter-spacing: 6px; text-align: center;
-    background: #05070b; border: 1px dashed #3a3f4b; border-radius: 10px; padding: 16px; user-select: all; }
+  /* Hero */
+  .hero-section {
+    padding: 40px 0 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 36px;
+    flex-wrap: wrap;
+  }
+  .hero-left {
+    flex: 1;
+    min-width: 300px;
+    max-width: 640px;
+  }
+  .hero-title {
+    font-size: clamp(2.2rem, 5vw, 3.2rem);
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+  .hero-title span {
+    color: var(--accent);
+  }
+  .hero-subtitle {
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    line-height: 1.6;
+  }
 
-  #lienzoWrap { position: relative; width: min(1080px, 96vw); max-width: 1080px; }
-  canvas { width: 100%; height: auto; display: block; background: #05070b;
-    border: 2px solid #262b36; border-radius: 10px; touch-action: none;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
-  #btnMute { position: absolute; top: 8px; right: 8px; padding: 4px 8px; font-size: .95rem;
-    background: rgba(10,12,18,.55); border-color: #2a3040; line-height: 1; opacity: .5; }
-  #btnMute:hover { opacity: 1; }
-  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 12px; text-align: center; pointer-events: none; }
-  #overlayTexto { font-size: 1.5rem; font-weight: 800; text-shadow: 0 2px 14px #000; }
-  #overlaySub { font-size: .9rem; color: #aab2c0; }
-  #btnRevancha, #btnMenu { pointer-events: auto; }
-  .ayuda { font-size: .82rem; color: #7b8494; max-width: 1080px; text-align: center; line-height: 1.6; }
-  kbd { background: #171a22; border: 1px solid #3a3f4b; border-bottom-width: 2px; border-radius: 4px;
-    padding: 1px 6px; font-family: ui-monospace, monospace; }
+  /* Join Card */
+  .join-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    width: 100%;
+    max-width: 360px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .join-card h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .join-card input {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 0.95rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: #fff;
+    font-family: 'Orbitron', monospace;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .join-card input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(244, 185, 68, 0.15);
+    outline: none;
+  }
+  .btn-unirte {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-unirte:hover {
+    background: rgba(244, 185, 68, 0.12);
+    transform: translateY(-1px);
+  }
+  .btn-unirte:active {
+    transform: scale(0.98);
+  }
+
+  /* Games Grid */
+  .section-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 24px;
+  }
+  .games-section {
+    padding: 20px 0 70px;
+  }
+  .games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 16px;
+  }
+  .game-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+    user-select: none;
+  }
+  .game-card:hover {
+    transform: translateY(-6px);
+    border-color: var(--accent);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.5), 0 0 20px rgba(244, 185, 68, 0.15);
+  }
+  .game-cover {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+  }
+  .game-cover-icon {
+    font-size: 2.2rem;
+    margin-bottom: 4px;
+    transition: transform 0.2s ease;
+  }
+  .game-card:hover .game-cover-icon {
+    transform: scale(1.1);
+  }
+  .game-cover-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(0,0,0,0.65);
+    border: 1px solid rgba(255,255,255,0.15);
+    letter-spacing: 0.5px;
+  }
+  .game-info {
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .game-name {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #fff;
+  }
+  .game-desc {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+
+  /* How it works */
+  .how-section {
+    padding: 20px 0 80px;
+  }
+  .how-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 28px;
+  }
+  .how-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .how-card .mono-label {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .how-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .how-card p {
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+
+  /* Contrib Box */
+  .contrib-section {
+    padding: 0 0 90px;
+  }
+  .contrib-box {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 36px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .contrib-text {
+    max-width: 600px;
+  }
+  .contrib-text h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .contrib-text p {
+    color: var(--text-muted);
+    font-size: 0.94rem;
+    line-height: 1.6;
+  }
+  .btn-contrib {
+    display: inline-block;
+    padding: 12px 28px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    background: var(--accent);
+    color: #0f0f10 !important;
+    border-radius: 6px;
+    white-space: nowrap;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    text-decoration: none;
+  }
+  .btn-contrib:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(244, 185, 68, 0.4);
+  }
+
+  /* Footer */
+  .app-footer {
+    padding: 32px 24px;
+    border-top: 1px solid var(--border);
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+    color: #666;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
+  /* Paneles de sala (Host / Guest) */
+  .room-panel-wrap {
+    min-height: 70vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+  .room-panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 36px;
+    width: min(520px, 96vw);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    text-align: center;
+  }
+  .room-panel .sub {
+    font-size: 0.92rem;
+    color: var(--text-muted);
+  }
+  .codigo {
+    font-family: 'Orbitron', monospace;
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: 8px;
+    text-align: center;
+    background: #090a0d;
+    border: 2px dashed var(--accent);
+    color: var(--accent);
+    border-radius: 10px;
+    padding: 18px;
+    user-select: all;
+    text-shadow: 0 0 20px rgba(244, 185, 68, 0.3);
+  }
+  .btn-secondary {
+    padding: 10px 18px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-secondary:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: #444;
+  }
+
+  /* Lienzo y Juego Activo */
+  #juego {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 12px 60px;
+  }
+  #lienzoWrap {
+    position: relative;
+    width: min(1080px, 96vw);
+    max-width: 1080px;
+  }
+  canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    background: #05070b;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    touch-action: none;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+  }
+  #btnMute {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 6px 10px;
+    font-size: 1rem;
+    background: rgba(15, 15, 16, 0.75);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    color: #fff;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, background 0.15s ease;
+  }
+  #btnMute:hover {
+    opacity: 1;
+    background: rgba(15, 15, 16, 0.95);
+    border-color: var(--accent);
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    background: rgba(15, 15, 16, 0.85);
+    backdrop-filter: blur(6px);
+    border-radius: 10px;
+    pointer-events: none;
+  }
+  #overlayTexto {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #fff;
+    text-shadow: 0 2px 14px #000;
+  }
+  #overlaySub {
+    font-size: 0.95rem;
+    color: var(--text-muted);
+  }
+  #btnRevancha, #btnMenu {
+    pointer-events: auto;
+  }
+  #btnRevancha {
+    background: var(--accent);
+    color: #0f0f10;
+    font-weight: 700;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.15s ease;
+  }
+  #btnRevancha:hover:not(:disabled) {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(244, 185, 68, 0.3);
+  }
+  #btnRevancha:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .ayuda {
+    font-size: 0.84rem;
+    color: var(--text-muted);
+    max-width: 1080px;
+    text-align: center;
+    line-height: 1.7;
+    padding: 8px 16px;
+    background: rgba(24, 24, 26, 0.6);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  kbd {
+    background: #1f2128;
+    border: 1px solid #3a3f4b;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.78rem;
+    color: var(--accent);
+  }
 </style>
 </head>
 <body>
 
-<h1>G A M E S &nbsp; P 2 P</h1>
+<div class="bg-glow"></div>
 
-<!-- ===== SELECTOR ===== -->
-<div id="seljuego" class="panel">
-  <div class="sub">Elegí un juego para <b>crear una sala</b>:</div>
-  <div id="listaJuegos"></div>
-  <hr />
-  <div class="sub">¿Te pasaron un código? Uníte (el juego lo elige quien creó la sala):</div>
-  <div class="fila">
-    <input id="inputCodigo" placeholder="CÓDIGO" maxlength="12" />
-    <button id="btnUnirse">Unirse</button>
+<header class="app-header">
+  <span class="brand" onclick="volverAlMenu()">GAMES<span class="dot">·</span>P2P</span>
+</header>
+
+<!-- ===== SELECTOR / LANDING ===== -->
+<div id="seljuego">
+  <div class="container">
+    <section class="hero-section">
+      <div class="hero-left">
+        <h1 class="hero-title">Juega <span style="color: #f4b944;">P2P</span> contra tu amigo</h1>
+        <p class="hero-subtitle">Arcade multijugador directo por WebRTC en tu navegador. Sin instalaciones, sin registros y sin servidores centrales.</p>
+      </div>
+      <div class="join-card">
+        <h2>¿Tienes un código?</h2>
+        <input id="inputCodigo" type="text" placeholder="Ingresa el código" maxlength="12" />
+        <button id="btnUnirse" class="btn-unirte">Unirte</button>
+      </div>
+    </section>
+
+    <section class="games-section">
+      <h2 class="section-title">Hostea un juego</h2>
+      <div id="listaJuegos" class="games-grid"></div>
+    </section>
+
+    <section class="how-section">
+      <h2 class="section-title">Cómo funciona</h2>
+      <div class="how-grid">
+        <div class="how-card">
+          <div class="mono-label">01</div>
+          <h3>Crea o únete</h3>
+          <p>Inicia una sala o entra con el código de 4 letras de un amigo.</p>
+        </div>
+        <div class="how-card">
+          <div class="mono-label">02</div>
+          <h3>Comparte el código</h3>
+          <p>Comparte el código con quien quieras que se conecte directamente.</p>
+        </div>
+        <div class="how-card">
+          <div class="mono-label">03</div>
+          <h3>Juega</h3>
+          <p>Controles simples en pantalla a 60 FPS. Que gane el mejor.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="contrib-section">
+      <div class="contrib-box">
+        <div class="contrib-text">
+          <h2>Contribuye al proyecto</h2>
+          <p>GAMESP2P es código abierto. Suma un juego nuevo, arregla un bug o mejora la conexión P2P. Haz un fork del repositorio y envía tu pull request.</p>
+        </div>
+        <a href="https://github.com/benjamin2134/GAMES_P2P_VIBECODING" target="_blank" rel="noopener noreferrer" class="btn-contrib">Ver en GitHub</a>
+      </div>
+    </section>
   </div>
 </div>
 
 <!-- ===== ESPERANDO (host) ===== -->
-<div id="esperando" class="panel oculto">
-  <div class="sub">Sala de <b id="nombreJuegoSala">—</b>. Pasale este código a tu amigo:</div>
-  <div id="codigoSala" class="codigo">····</div>
-  <div id="estadoHost" class="sub">Iniciando…</div>
-  <button id="btnCancelar">Cancelar</button>
+<div id="esperando" class="oculto room-panel-wrap">
+  <div class="room-panel">
+    <div class="sub">Sala de <b id="nombreJuegoSala" style="color:#fff">—</b>. Pasale este código a tu amigo:</div>
+    <div id="codigoSala" class="codigo">····</div>
+    <div id="estadoHost" class="sub">Iniciando…</div>
+    <button id="btnCancelar" class="btn-secondary">Cancelar</button>
+  </div>
 </div>
 
 <!-- ===== CONECTANDO (guest) ===== -->
-<div id="conectando" class="panel oculto">
-  <div id="estadoGuest" class="sub">Conectando…</div>
-  <button id="btnCancelar2">Cancelar</button>
+<div id="conectando" class="oculto room-panel-wrap">
+  <div class="room-panel">
+    <div id="estadoGuest" class="sub">Conectando…</div>
+    <button id="btnCancelar2" class="btn-secondary">Cancelar</button>
+  </div>
 </div>
 
 <!-- ===== JUEGO ===== -->
-<div id="juego" class="oculto" style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+<div id="juego" class="oculto">
   <div id="lienzoWrap">
     <canvas id="cv" width="820" height="480"></canvas>
-    <button id="btnMute" title="Sonido">🔊</button>
+    <button id="btnMute" title="Silenciar audio">🔊</button>
     <div id="overlay" class="oculto">
       <div id="overlayTexto"></div>
       <div id="overlaySub"></div>
-      <button id="btnRevancha" class="primario">Revancha</button>
-      <button id="btnMenu" class="oculto">Volver al menú</button>
+      <button id="btnRevancha">Revancha</button>
+      <button id="btnMenu" class="oculto btn-secondary" style="margin-top: 6px;">Volver al menú</button>
     </div>
   </div>
   <div class="ayuda">
@@ -107,6 +637,10 @@
     <b>Techno:</b> click en la grilla para activar pasos. <kbd>+</kbd>/<kbd>-</kbd> BPM (host). Pad XY = filtro ácido (guest). Click derecho en un canal tuyo = Volumen + EQ. <kbd>1</kbd>-<kbd>9</kbd> mutear canal.
   </div>
 </div>
+
+<footer class="app-footer">
+  GAMESP2P © 2026
+</footer>
 
 <!-- ===== PeerJS 1.5.4 (embebido por build.mjs) ===== -->
 <script>/*__PEERJS__*/</script>

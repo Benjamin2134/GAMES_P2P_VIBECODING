@@ -210,18 +210,42 @@ $("btnMute").onclick = () => {
 };
 
 // ---------- selector ----------
+const METADATOS_JUEGOS = {
+  pong: { tag: "PONG", icono: "🏓", gradiente: "linear-gradient(135deg, #052e16 0%, #064e3b 100%)", color: "#10b981" },
+  billar: { tag: "POOL", icono: "🎱", gradiente: "linear-gradient(135deg, #064e3b 0%, #0f172a 100%)", color: "#34d399" },
+  spacewar: { tag: "1979", icono: "🚀", gradiente: "linear-gradient(135deg, #1e1b4b 0%, #31104b 100%)", color: "#a855f7" },
+  battleship: { tag: "NAVY", icono: "🚢", gradiente: "linear-gradient(135deg, #082f49 0%, #0c4a6e 100%)", color: "#38bdf8" },
+  tron: { tag: "LIGHT", icono: "⚡", gradiente: "linear-gradient(135deg, #042f2e 0%, #111827 100%)", color: "#2dd4bf" },
+  monopoly: { tag: "DUEL", icono: "🎩", gradiente: "linear-gradient(135deg, #3f2c06 0%, #1c1917 100%)", color: "#f59e0b" },
+  techno: { tag: "JAM", icono: "🎛️", gradiente: "linear-gradient(135deg, #4a044e 0%, #1e1b4b 100%)", color: "#f43f5e" }
+};
+
 function pintarSelector() {
   const c = $("listaJuegos");
+  if (!c) return;
   c.innerHTML = "";
   for (const id of Object.keys(JUEGOS)) {
     const j = JUEGOS[id];
-    const b = document.createElement("button");
-    b.className = "juegoBtn";
-    b.innerHTML = "<b>" + j.nombre + "</b><span>" + (j.desc || "") + "</span>";
-    b.onclick = () => crearSala(id);
-    c.appendChild(b);
+    const meta = METADATOS_JUEGOS[id] || { tag: "P2P", icono: "🎮", gradiente: "linear-gradient(135deg, #18181a 0%, #262b36 100%)", color: "#f4b944" };
+    const card = document.createElement("div");
+    card.className = "game-card";
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.innerHTML =
+      '<div class="game-cover" style="background: ' + meta.gradiente + ';">' +
+        '<span class="game-cover-badge" style="color:' + meta.color + ';">' + meta.tag + '</span>' +
+        '<div class="game-cover-icon">' + meta.icono + '</div>' +
+      '</div>' +
+      '<div class="game-info">' +
+        '<div class="game-name">' + j.nombre + '</div>' +
+        '<div class="game-desc">' + (j.desc || "") + '</div>' +
+      '</div>';
+    card.onclick = () => crearSala(id);
+    card.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); crearSala(id); } };
+    c.appendChild(card);
   }
 }
+window.volverAlMenu = volverAlMenu;
 
 // ---------- loop maestro ----------
 let _mLast = performance.now();
