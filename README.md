@@ -11,8 +11,13 @@ Arcade multijugador retro 100% P2P (Peer-to-Peer a 120 Hz) sin servidor intermed
 1. 🏓 **PONG:** Duelo clásico a 120 Hz con interpolación y retardo adaptativo.
 2. 🎱 **BILLAR 8-BALL:** Física realista de bolas, troneras y línea de puntería.
 3. 🚀 **SPACEWAR 1979:** Combate de naves espaciales vectoriales con inercia newtoniana.
-4. ⚓ **BATTLESHIP:** Batalla naval 10x10 con niebla de guerra y radar de sonar.
-5. 🏍️ **CYBER TRON:** Motos de luz en arena expandida (1000x600 px), giros en 90°, estelas y turbo boost.
+4. ⚓ **BATTLESHIP:** Batalla naval 10x10 con niebla de guerra y radar de sonar. Click en un barco
+   propio para seleccionarlo (resaltado) y girarlo con las flechas ↺/↻ que aparecen a su lado,
+   pivotando sobre su propio centro; click en otra celda para moverlo. Todo con validación de
+   límites y solapamiento (rechazo con sonido de error si no entra).
+5. 🏍️ **CYBER TRON:** Motos de luz en arena expandida (1000x600 px), giros en 90°, estelas y turbo
+   boost. Power-up ⚡ de acelerón sorpresa cada 5-9 s en un punto aleatorio. Música de fondo
+   futurista sintetizada en bucle durante toda la partida (100% Web Audio, sin archivos).
 6. 🎲 **MONOPOLY DUEL:** Duelo inmobiliario en tablero de 24 casillas, dados, compras, casas y bancarrota.
 7. 🎛️ **TECHNO JAM:** Groovebox P2P — secuenciador de 17 pasos x 11 canales. Host: caja de ritmos 909
    (kick/snare/hats). Guest: bajo ácido 303 (x4) + **sinte, piano y guitarra** + pad XY de filtro.

@@ -351,6 +351,188 @@ const RetroAudio = (() => {
     } catch (e) {}
   }
 
+  // 8. Error / Acción denegada (dos tonos cortos descendentes)
+  function playError() {
+    if (silenciado || !ctx) return;
+    try {
+      const now = ctx.currentTime;
+      [220, 165].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = now + idx * 0.09;
+        osc.type = "square";
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.14, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.09);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.1);
+      });
+    } catch (e) {}
+  }
+
+  // 9. Power-up recogido (arpegio ascendente brillante)
+  function playPowerup() {
+    if (silenciado || !ctx) return;
+    try {
+      const now = ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = now + idx * 0.045;
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.exponentialRampToValueAtTime(0.2, start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.16);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.17);
+      });
+    } catch (e) {}
+  }
+
+  // 10. Música de fondo futurista en bucle (100% sintetizada, sin muestras).
+  //     Es puramente decorativa y local: cada máquina la reproduce por su
+  //     cuenta, nunca viaja por red (mismo criterio que el resto del audio).
+  let musicTimer = null;
+  let musicStep = 0;
+  let droneOsc1 = null, droneOsc2 = null, droneFilt = null, droneGain = null, droneLfo = null;
+
+  // Patron de 16 pasos (2 compases), en semitonos relativos a la raiz (La = 55Hz).
+  const MUSICA_BAJO = [0, 0, 7, 0, 3, 0, 7, 5, 0, 0, 7, 0, 3, 5, 7, 10];
+  const MUSICA_RAIZ = 55;
+
+  function _pulsoBajoMusica(freq, start) {
+    const osc = ctx.createOscillator();
+    const filt = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(freq, start);
+    filt.type = "lowpass";
+    filt.frequency.setValueAtTime(900, start);
+    filt.Q.value = 4;
+    gain.gain.setValueAtTime(0.001, start);
+    gain.gain.exponentialRampToValueAtTime(0.14, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.16);
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.18);
+  }
+
+  function _arpegioMusica(freq, start) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.001, start);
+    gain.gain.exponentialRampToValueAtTime(0.05, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.32);
+  }
+
+  function _hatMusica(start) {
+    const bufferSize = Math.floor(ctx.sampleRate * 0.05);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filt = ctx.createBiquadFilter();
+    filt.type = "highpass";
+    filt.frequency.setValueAtTime(6000, start);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.03, start);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.04);
+    noise.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+    noise.start(start);
+  }
+
+  function _musicaTick() {
+    if (silenciado || !ctx) return;
+    try {
+      const paso = musicStep % MUSICA_BAJO.length;
+      const now = ctx.currentTime;
+      const semitono = MUSICA_BAJO[paso];
+      const freqBajo = MUSICA_RAIZ * Math.pow(2, semitono / 12);
+      _pulsoBajoMusica(freqBajo, now);
+      if (paso % 4 === 0) _arpegioMusica(freqBajo * 4, now + 0.03);
+      if (paso % 2 === 1) _hatMusica(now);
+    } catch (e) {}
+  }
+
+  function startMusicLoop() {
+    if (!ctx || musicTimer) return;
+    try {
+      musicStep = 0;
+      const now = ctx.currentTime;
+
+      droneGain = ctx.createGain();
+      droneGain.gain.setValueAtTime(0.0001, now);
+      droneGain.gain.exponentialRampToValueAtTime(0.045, now + 1.5);
+
+      droneFilt = ctx.createBiquadFilter();
+      droneFilt.type = "lowpass";
+      droneFilt.frequency.setValueAtTime(500, now);
+
+      droneOsc1 = ctx.createOscillator();
+      droneOsc1.type = "sawtooth";
+      droneOsc1.frequency.value = MUSICA_RAIZ;
+      droneOsc2 = ctx.createOscillator();
+      droneOsc2.type = "sawtooth";
+      droneOsc2.frequency.value = MUSICA_RAIZ * 1.007;
+
+      droneOsc1.connect(droneFilt);
+      droneOsc2.connect(droneFilt);
+      droneFilt.connect(droneGain);
+      droneGain.connect(ctx.destination);
+
+      droneLfo = ctx.createOscillator();
+      droneLfo.type = "sine";
+      droneLfo.frequency.value = 0.08;
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 280;
+      droneLfo.connect(lfoGain);
+      lfoGain.connect(droneFilt.frequency);
+
+      droneOsc1.start(now);
+      droneOsc2.start(now);
+      droneLfo.start(now);
+
+      const bpm = 128;
+      const stepMs = (60000 / bpm) / 2;
+      musicTimer = setInterval(() => { _musicaTick(); musicStep++; }, stepMs);
+    } catch (e) {}
+  }
+
+  function stopMusicLoop() {
+    if (musicTimer) {
+      clearInterval(musicTimer);
+      musicTimer = null;
+    }
+    if (ctx && droneGain) {
+      try {
+        const now = ctx.currentTime;
+        droneGain.gain.cancelScheduledValues(now);
+        droneGain.gain.setValueAtTime(droneGain.gain.value, now);
+        droneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+        droneOsc1.stop(now + 0.45);
+        droneOsc2.stop(now + 0.45);
+        droneLfo.stop(now + 0.45);
+      } catch (e) {}
+    }
+    droneOsc1 = droneOsc2 = droneFilt = droneGain = droneLfo = null;
+  }
+
   return {
     init,
     toggleMute,
@@ -362,7 +544,11 @@ const RetroAudio = (() => {
     playPongBeep,
     playWin,
     playSonar,
-    playSplash
+    playSplash,
+    playError,
+    playPowerup,
+    startMusicLoop,
+    stopMusicLoop
   };
 })();
 
@@ -1240,7 +1426,15 @@ const TRON = {
   RONDAS_GANAR: 5,
   PAUSA_RONDA_S: 1.8,
   COL_P1: "#00f0ff",
-  COL_P2: "#ff0055"
+  COL_P2: "#ff0055",
+  // Power-up de "acelerón sorpresa": aparece cada tanto en un punto aleatorio
+  // de la arena; el primero que lo toca gana un chorro de velocidad temporal.
+  POWERUP_RADIO: 16,
+  POWERUP_MARGEN: 70,       // distancia minima a las paredes al aparecer
+  POWERUP_SPAWN_MIN_S: 5,
+  POWERUP_SPAWN_MAX_S: 9,
+  BOOST_VEL: 620,           // px / seg mientras dura el acelerón
+  BOOST_DUR_S: 2.2
 };
 
 const DIR_VECS = {
@@ -1268,8 +1462,8 @@ class TronSim {
   iniciarRonda() {
     const yIni = TRON.H / 2;
     this.motos = {
-      1: { x: 160, y: yIni, dir: "E", dirPendiente: "E", turbo: false, turboVal: TRON.TURBO_MAX, viva: true },
-      2: { x: TRON.W - 160, y: yIni, dir: "W", dirPendiente: "W", turbo: false, turboVal: TRON.TURBO_MAX, viva: true }
+      1: { x: 160, y: yIni, dir: "E", dirPendiente: "E", turbo: false, turboVal: TRON.TURBO_MAX, boostVal: 0, viva: true },
+      2: { x: TRON.W - 160, y: yIni, dir: "W", dirPendiente: "W", turbo: false, turboVal: TRON.TURBO_MAX, boostVal: 0, viva: true }
     };
     this.estelas = {
       1: [{ x: 160, y: yIni }],
@@ -1279,6 +1473,17 @@ class TronSim {
     this.sirviendo = true;
     this.reinicioEn = 0;
     this.explosiones = [];
+    this.powerup = null;
+    this.powerupEn = TRON.POWERUP_SPAWN_MIN_S + Math.random() * (TRON.POWERUP_SPAWN_MAX_S - TRON.POWERUP_SPAWN_MIN_S);
+    this.boostTomado = [];
+  }
+
+  _spawnPowerup() {
+    const m = TRON.POWERUP_MARGEN;
+    this.powerup = {
+      x: m + Math.random() * (TRON.W - 2 * m),
+      y: m + Math.random() * (TRON.H - 2 * m)
+    };
   }
 
   aplicarInputHost(inp) { this._procesarInput(1, inp); }
@@ -1321,6 +1526,12 @@ class TronSim {
       return;
     }
 
+    // Aparición periódica del power-up de acelerón
+    if (!this.powerup) {
+      this.powerupEn -= dt;
+      if (this.powerupEn <= 0) this._spawnPowerup();
+    }
+
     const colisiones = { 1: false, 2: false };
 
     for (let id = 1; id <= 2; id++) {
@@ -1334,7 +1545,10 @@ class TronSim {
       }
 
       let vel = TRON.VEL_BASE;
-      if (m.turbo && m.turboVal > 5) {
+      if (m.boostVal > 0) {
+        m.boostVal = Math.max(0, m.boostVal - dt);
+        vel = TRON.BOOST_VEL;
+      } else if (m.turbo && m.turboVal > 5) {
         vel = TRON.VEL_TURBO;
         m.turboVal = Math.max(0, m.turboVal - TRON.TURBO_GASTO * dt);
       } else {
@@ -1345,6 +1559,17 @@ class TronSim {
       const prevX = m.x, prevY = m.y;
       m.x += vec.x * vel * dt;
       m.y += vec.y * vel * dt;
+
+      // Recolección del power-up de acelerón
+      if (this.powerup) {
+        const dPow = Math.hypot(m.x - this.powerup.x, m.y - this.powerup.y);
+        if (dPow < TRON.POWERUP_RADIO + 9) {
+          m.boostVal = TRON.BOOST_DUR_S;
+          this.powerup = null;
+          this.powerupEn = TRON.POWERUP_SPAWN_MIN_S + Math.random() * (TRON.POWERUP_SPAWN_MAX_S - TRON.POWERUP_SPAWN_MIN_S);
+          this.boostTomado.push(id);
+        }
+      }
 
       // Límites de arena
       if (m.x <= 8 || m.x >= TRON.W - 8 || m.y <= 8 || m.y >= TRON.H - 8) {
@@ -1410,8 +1635,13 @@ class TronSim {
     if (!pts || pts.length === 0) return false;
 
     const todos = [...pts, { x: m.x, y: m.y }];
-    // Si es la propia estela, ignoramos los 2 últimos segmentos más cercanos a la cabeza
-    const limite = esPropia ? todos.length - 2 : todos.length - 1;
+    // Si es la propia estela, ignoramos los 2 últimos segmentos más cercanos a la cabeza:
+    // el segmento que se está dibujando ahora mismo Y el segmento anterior que
+    // comparte el vértice del último giro. Ese vértice compartido (dos segmentos
+    // perpendiculares que se tocan en un punto) hacía que el test de intersección
+    // por CCW diera un falso positivo justo al girar, en la mitad de los giros
+    // (según su sentido horario/antihorario) — la moto se "chocaba sola" al girar.
+    const limite = esPropia ? todos.length - 3 : todos.length - 1;
 
     for (let i = 0; i < limite; i++) {
       const pA = todos[i];
@@ -1438,8 +1668,8 @@ class TronSim {
 
     return {
       seq: this.seq,
-      m1: { x: Math.round(m1.x), y: Math.round(m1.y), dir: m1.dir, turbo: m1.turbo, tb: Math.round(m1.turboVal), viva: m1.viva },
-      m2: { x: Math.round(m2.x), y: Math.round(m2.y), dir: m2.dir, turbo: m2.turbo, tb: Math.round(m2.turboVal), viva: m2.viva },
+      m1: { x: Math.round(m1.x), y: Math.round(m1.y), dir: m1.dir, turbo: m1.turbo, tb: Math.round(m1.turboVal), boost: m1.boostVal > 0, viva: m1.viva },
+      m2: { x: Math.round(m2.x), y: Math.round(m2.y), dir: m2.dir, turbo: m2.turbo, tb: Math.round(m2.turboVal), boost: m2.boostVal > 0, viva: m2.viva },
       e1: this.estelas[1],
       e2: this.estelas[2],
       p1: this.puntos[1],
@@ -1449,7 +1679,9 @@ class TronSim {
       ganador: this.ganador,
       rev1: this.revancha[1],
       rev2: this.revancha[2],
-      expl: this.explosiones.length ? this.explosiones.splice(0) : null
+      expl: this.explosiones.length ? this.explosiones.splice(0) : null,
+      powerup: this.powerup,
+      boostTomado: this.boostTomado.length ? this.boostTomado.splice(0) : null
     };
   }
 }
@@ -2919,8 +3151,7 @@ class TechnoSim {
   // Estado local para colocación de barcos
   const L = {
     flotaLocal: [],
-    barcoSeleccionadoIdx: 0,
-    horiz: true,
+    barcoSeleccionadoIdx: null, // null = ningún barco seleccionado
     confirmadoLocal: false,
     hoverX: -1,
     hoverY: -1,
@@ -2928,6 +3159,8 @@ class TechnoSim {
     sonarSweepAng: 0,
     animImpacto: null
   };
+
+  const FLECHA_R = 13; // radio de los botones circulares de rotación
 
   function inicializarFlotaLocal() {
     L.flotaLocal = [
@@ -2937,7 +3170,97 @@ class TechnoSim {
       { id: "submarine", nombre: "Submarino", tam: 3, x: 0, y: 6, horiz: true },
       { id: "destroyer", nombre: "Destructor", tam: 2, x: 0, y: 8, horiz: true }
     ];
+    L.barcoSeleccionadoIdx = null;
     L.confirmadoLocal = false;
+  }
+
+  // --- Helpers de geometría de la flota (colocación) ---
+  function ocupaCelda(barco, cx, cy) {
+    for (let i = 0; i < barco.tam; i++) {
+      const x = barco.horiz ? barco.x + i : barco.x;
+      const y = barco.horiz ? barco.y : barco.y + i;
+      if (x === cx && y === cy) return true;
+    }
+    return false;
+  }
+
+  function posicionValida(flota, idxExcluir, x, y, tam, horiz) {
+    if (x < 0 || y < 0) return false;
+    if (horiz && x + tam > 10) return false;
+    if (!horiz && y + tam > 10) return false;
+    for (let i = 0; i < tam; i++) {
+      const cx = horiz ? x + i : x;
+      const cy = horiz ? y : y + i;
+      for (let j = 0; j < flota.length; j++) {
+        if (j === idxExcluir) continue;
+        if (ocupaCelda(flota[j], cx, cy)) return false;
+      }
+    }
+    return true;
+  }
+
+  function moverBarcoSeleccionado(cx, cy) {
+    const idx = L.barcoSeleccionadoIdx;
+    const barco = L.flotaLocal[idx];
+    if (!barco) return;
+    if (posicionValida(L.flotaLocal, idx, cx, cy, barco.tam, barco.horiz)) {
+      barco.x = cx;
+      barco.y = cy;
+      RetroAudio.playPongBeep(false);
+    } else {
+      RetroAudio.playError();
+    }
+  }
+
+  // Rota el barco seleccionado 90° pivotando sobre su propio centro, con
+  // ajuste a los límites del tablero y validación de solapamiento. Si no
+  // entra en ninguna posición cercana, la rotación se rechaza (sonido de error).
+  function rotarBarcoSeleccionado(sentidoHorario) {
+    const idx = L.barcoSeleccionadoIdx;
+    const barco = L.flotaLocal[idx];
+    if (!barco) return;
+
+    const tam = barco.tam;
+    const nuevoHoriz = !barco.horiz;
+    const w = barco.horiz ? tam : 1;
+    const h = barco.horiz ? 1 : tam;
+    const centerX = barco.x + (w - 1) / 2;
+    const centerY = barco.y + (h - 1) / 2;
+
+    let nx, ny;
+    if (nuevoHoriz) {
+      nx = Math.round(centerX - (tam - 1) / 2);
+      ny = Math.round(centerY);
+    } else {
+      nx = Math.round(centerX);
+      ny = Math.round(centerY - (tam - 1) / 2);
+    }
+    nx = Math.max(0, Math.min(nx, nuevoHoriz ? 10 - tam : 9));
+    ny = Math.max(0, Math.min(ny, nuevoHoriz ? 9 : 10 - tam));
+
+    if (posicionValida(L.flotaLocal, idx, nx, ny, tam, nuevoHoriz)) {
+      barco.x = nx;
+      barco.y = ny;
+      barco.horiz = nuevoHoriz;
+      RetroAudio.playPongBeep(sentidoHorario);
+    } else {
+      RetroAudio.playError();
+    }
+  }
+
+  // Posición en pantalla de los dos botones de rotación (CCW/CW) del barco
+  // seleccionado: justo al costado de su centro, con el eje perpendicular
+  // a su orientación actual, y siempre dentro del área del tablero propio.
+  function posicionFlechas(barco) {
+    const w = barco.horiz ? barco.tam : 1;
+    const h = barco.horiz ? 1 : barco.tam;
+    let cx = TAB_PROPIO.x + (barco.x + w / 2) * CELL;
+    let cy = TAB_PROPIO.y + (barco.y + h / 2) * CELL;
+    if (barco.horiz) cy += (h * CELL) / 2 + 20;
+    else cx += (w * CELL) / 2 + 20;
+    cx = Math.min(Math.max(cx, TAB_PROPIO.x + 18), TAB_PROPIO.x + GRID_PX - 18);
+    cy = Math.min(Math.max(cy, TAB_PROPIO.y + 18), TAB_PROPIO.y + GRID_PX - 18);
+    return { ccwX: cx - 16, ccwY: cy, cwX: cx + 16, cwY: cy };
   }
 
   function mouseXY(e) {
@@ -2985,8 +3308,8 @@ class TechnoSim {
 
     // 1. Botones de Fase de Colocación
     if (fase === "colocacion" && !L.confirmadoLocal) {
-      // Botón Aleatorio (x: 70, y: 470, w: 140, h: 36)
-      if (m.x >= 70 && m.x <= 210 && m.y >= 470 && m.y <= 506) {
+      // Botón Aleatorio (x: 70, y: 470, w: 160, h: 36)
+      if (m.x >= 70 && m.x <= 230 && m.y >= 470 && m.y <= 506) {
         if (net.rol === 1 && sim) {
           L.flotaLocal = sim.generarFlotaAleatoria();
         } else {
@@ -2994,37 +3317,33 @@ class TechnoSim {
           const tempSim = new BattleshipSim();
           L.flotaLocal = tempSim.generarFlotaAleatoria();
         }
+        L.barcoSeleccionadoIdx = null;
         RetroAudio.playPongBeep(true);
         return;
       }
 
-      // Botón Rotar (x: 220, y: 470, w: 100, h: 36)
-      if (m.x >= 220 && m.x <= 320 && m.y >= 470 && m.y <= 506) {
-        L.horiz = !L.horiz;
-        RetroAudio.playPongBeep(false);
-        return;
-      }
-
-      // Botón Confirmar Flota (x: 330, y: 470, w: 180, h: 36)
-      if (m.x >= 330 && m.x <= 510 && m.y >= 470 && m.y <= 506) {
+      // Botón Confirmar Flota (x: 250, y: 470, w: 220, h: 36)
+      if (m.x >= 250 && m.x <= 470 && m.y >= 470 && m.y <= 506) {
         confirmarFlota();
         return;
       }
 
-      // Clic en tablero propio para reposicionar barco
+      // Flechas de rotación del barco seleccionado (si hay uno)
+      if (L.barcoSeleccionadoIdx !== null && L.flotaLocal[L.barcoSeleccionadoIdx]) {
+        const f = posicionFlechas(L.flotaLocal[L.barcoSeleccionadoIdx]);
+        if (Math.hypot(m.x - f.ccwX, m.y - f.ccwY) <= FLECHA_R) { rotarBarcoSeleccionado(false); return; }
+        if (Math.hypot(m.x - f.cwX, m.y - f.cwY) <= FLECHA_R) { rotarBarcoSeleccionado(true); return; }
+      }
+
+      // Clic en tablero propio: seleccionar un barco, o mover el ya seleccionado
       const cPropio = celdaDesdePos(m.x, m.y, TAB_PROPIO);
       if (cPropio) {
-        const barco = L.flotaLocal[L.barcoSeleccionadoIdx];
-        if (barco) {
-          const maxX = L.horiz ? 10 - barco.tam : 9;
-          const maxY = L.horiz ? 9 : 10 - barco.tam;
-          if (cPropio.cx <= maxX && cPropio.cy <= maxY) {
-            barco.x = cPropio.cx;
-            barco.y = cPropio.cy;
-            barco.horiz = L.horiz;
-            L.barcoSeleccionadoIdx = (L.barcoSeleccionadoIdx + 1) % L.flotaLocal.length;
-            RetroAudio.playPongBeep(false);
-          }
+        const idxClic = L.flotaLocal.findIndex(b => ocupaCelda(b, cPropio.cx, cPropio.cy));
+        if (idxClic >= 0) {
+          L.barcoSeleccionadoIdx = idxClic;
+          RetroAudio.playPongBeep(false);
+        } else if (L.barcoSeleccionadoIdx !== null) {
+          moverBarcoSeleccionado(cPropio.cx, cPropio.cy);
         }
         return;
       }
@@ -3039,14 +3358,16 @@ class TechnoSim {
     }
   }
 
-  function onKeyDown(e) {
-    if (e.key === "r" || e.key === "R") {
-      L.horiz = !L.horiz;
-      RetroAudio.playPongBeep(false);
-    }
-  }
-
   function confirmarFlota() {
+    // Chequeo local defensivo: si por algún motivo la flota quedara inválida
+    // (solapada o fuera de rango), no la bloqueamos como confirmada — eso
+    // dejaría al jugador sin poder editar y a la partida sin arrancar nunca.
+    const tempSim = (net.rol === 1 && sim) ? sim : new BattleshipSim();
+    if (!tempSim.validarFlota(L.flotaLocal)) {
+      RetroAudio.playError();
+      return;
+    }
+
     L.confirmadoLocal = true;
     RetroAudio.playSonar();
 
@@ -3111,7 +3432,6 @@ class TechnoSim {
       inicializarFlotaLocal();
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKeyDown);
     },
 
     iniciarGuest() {
@@ -3120,7 +3440,6 @@ class TechnoSim {
       inicializarFlotaLocal();
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKeyDown);
     },
 
     destruir() {
@@ -3128,7 +3447,6 @@ class TechnoSim {
       snap = null;
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
     },
 
     onData(msg) {
@@ -3230,6 +3548,7 @@ class TechnoSim {
     // 4. Render Controles de Colocación
     if (fase === "colocacion") {
       renderPanelColocacion();
+      renderSeleccionYFlechas();
     }
   }
 
@@ -3249,7 +3568,7 @@ class TechnoSim {
       ctx.fillStyle = "#88b090";
       const estadoMsg = miListo
         ? (rivalListo ? "¡Ambas flotas listas! Iniciando combate..." : "Esperando que el rival confirme su flota...")
-        : "Posiciona tus 5 buques de combate y presiona [CONFIRMAR FLOTA]";
+        : "Click en un barco para seleccionarlo y rotarlo · click en otra celda para moverlo";
       ctx.fillText(estadoMsg, K.W / 2, 65);
     } else if (fase === "combate") {
       const miTurno = esMiTurno();
@@ -3417,26 +3736,65 @@ class TechnoSim {
     ctx.fillStyle = "rgba(0, 255, 102, 0.1)";
     ctx.strokeStyle = "#39ff14";
     ctx.lineWidth = 1.5;
-    ctx.fillRect(70, 470, 140, 36);
-    ctx.strokeRect(70, 470, 140, 36);
+    ctx.fillRect(70, 470, 160, 36);
+    ctx.strokeRect(70, 470, 160, 36);
 
     ctx.font = "bold 12px monospace";
     ctx.fillStyle = "#39ff14";
     ctx.textAlign = "center";
-    ctx.fillText("🎲 ALEATORIO", 140, 493);
+    ctx.fillText("🎲 ALEATORIO", 150, 493);
 
-    // Botón 2: Rotar
-    ctx.fillStyle = "rgba(0, 255, 102, 0.1)";
-    ctx.fillRect(220, 470, 100, 36);
-    ctx.strokeRect(220, 470, 100, 36);
-    ctx.fillText(L.horiz ? "🔄 HORIZ (R)" : "🔄 VERT (R)", 270, 493);
-
-    // Botón 3: Confirmar Flota
+    // Botón 2: Confirmar Flota
     ctx.fillStyle = "#39ff14";
-    ctx.fillRect(330, 470, 180, 36);
+    ctx.fillRect(250, 470, 220, 36);
     ctx.fillStyle = "#000000";
-    ctx.fillText("⚓ CONFIRMAR FLOTA", 420, 493);
+    ctx.fillText("⚓ CONFIRMAR FLOTA", 360, 493);
 
+    ctx.restore();
+  }
+
+  // Resalta el barco seleccionado y dibuja sus dos botones de rotación
+  // (sentido horario / antihorario) justo al costado.
+  function renderSeleccionYFlechas() {
+    if (L.confirmadoLocal) return;
+    if (L.barcoSeleccionadoIdx === null) return;
+    const barco = L.flotaLocal[L.barcoSeleccionadoIdx];
+    if (!barco) return;
+
+    const w = barco.horiz ? barco.tam * CELL - 4 : CELL - 4;
+    const h = barco.horiz ? CELL - 4 : barco.tam * CELL - 4;
+    const bx = TAB_PROPIO.x + barco.x * CELL + 2;
+    const by = TAB_PROPIO.y + barco.y * CELL + 2;
+
+    ctx.save();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 8;
+    ctx.strokeRect(bx - 3, by - 3, w + 6, h + 6);
+    ctx.restore();
+
+    const f = posicionFlechas(barco);
+    dibujarFlechaRotacion(f.ccwX, f.ccwY, "↺");
+    dibujarFlechaRotacion(f.cwX, f.cwY, "↻");
+  }
+
+  function dibujarFlechaRotacion(cx, cy, glifo) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, FLECHA_R, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 20, 10, 0.9)";
+    ctx.fill();
+    ctx.strokeStyle = "#39ff14";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.font = "bold 16px monospace";
+    ctx.fillStyle = "#39ff14";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(glifo, cx, cy + 1);
     ctx.restore();
   }
 })();
@@ -3522,6 +3880,7 @@ class TechnoSim {
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
       window.addEventListener("keyup", onKeyUp);
+      RetroAudio.startMusicLoop();
     },
 
     iniciarGuest() {
@@ -3533,6 +3892,7 @@ class TechnoSim {
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
       window.addEventListener("keyup", onKeyUp);
+      RetroAudio.startMusicLoop();
     },
 
     destruir() {
@@ -3540,6 +3900,7 @@ class TechnoSim {
       snap = null;
       particulas = [];
       RetroAudio.stopThrust();
+      RetroAudio.stopMusicLoop();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     },
@@ -3562,6 +3923,9 @@ class TechnoSim {
           snap.expl.forEach(exp => crearExplosionParticulas(exp.x, exp.y, exp.col));
           RetroAudio.playExplosion();
         }
+        if (snap.boostTomado && snap.boostTomado.length) {
+          RetroAudio.playPowerup();
+        }
       }
     },
 
@@ -3572,6 +3936,9 @@ class TechnoSim {
           if (sim.explosiones.length) {
             sim.explosiones.forEach(exp => crearExplosionParticulas(exp.x, exp.y, exp.col));
             RetroAudio.playExplosion();
+          }
+          if (sim.boostTomado.length) {
+            RetroAudio.playPowerup();
           }
         }
         snap = sim.snapshot();
@@ -3587,7 +3954,7 @@ class TechnoSim {
         sirviendoPrevio = snap.sirviendo;
       }
 
-      renderTron(dtSeg);
+      renderTron(now, dtSeg);
     },
 
     overlay() {
@@ -3618,7 +3985,7 @@ class TechnoSim {
   // ==========================================================================
   //  RENDERIZADO CANVAS 2D (Estética Cyber Neon 1982)
   // ==========================================================================
-  function renderTron(dtSeg) {
+  function renderTron(now, dtSeg) {
     ctx.fillStyle = "#04060f";
     ctx.fillRect(0, 0, K.W, K.H);
 
@@ -3636,8 +4003,10 @@ class TechnoSim {
     dibujarEstela(snap.e1, snap.m1, K.COL_P1);
     dibujarEstela(snap.e2, snap.m2, K.COL_P2);
 
-    if (snap.m1 && snap.m1.viva) dibujarMoto(snap.m1.x, snap.m1.y, snap.m1.dir, K.COL_P1, snap.m1.turbo);
-    if (snap.m2 && snap.m2.viva) dibujarMoto(snap.m2.x, snap.m2.y, snap.m2.dir, K.COL_P2, snap.m2.turbo);
+    if (snap.powerup) dibujarPowerup(snap.powerup.x, snap.powerup.y, now);
+
+    if (snap.m1 && snap.m1.viva) dibujarMoto(snap.m1.x, snap.m1.y, snap.m1.dir, K.COL_P1, snap.m1.turbo, snap.m1.boost);
+    if (snap.m2 && snap.m2.viva) dibujarMoto(snap.m2.x, snap.m2.y, snap.m2.dir, K.COL_P2, snap.m2.turbo, snap.m2.boost);
 
     renderParticulas(dtSeg);
     renderHUD();
@@ -3683,7 +4052,7 @@ class TechnoSim {
     ctx.restore();
   }
 
-  function dibujarMoto(x, y, dir, color, turbo) {
+  function dibujarMoto(x, y, dir, color, turbo, boost) {
     ctx.save();
     ctx.translate(x, y);
 
@@ -3695,8 +4064,8 @@ class TechnoSim {
     ctx.rotate(rad);
 
     ctx.fillStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 12;
+    ctx.shadowColor = boost ? "#fff23d" : color;
+    ctx.shadowBlur = boost ? 24 : 12;
 
     ctx.beginPath();
     ctx.moveTo(10, 0);
@@ -3710,10 +4079,49 @@ class TechnoSim {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(4, -2, 6, 4);
 
-    if (turbo) {
+    if (boost) {
+      ctx.fillStyle = "#fff23d";
+      ctx.shadowColor = "#fff23d";
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.moveTo(-12, -4);
+      ctx.lineTo(-24, 0);
+      ctx.lineTo(-12, 4);
+      ctx.closePath();
+      ctx.fill();
+    } else if (turbo) {
       ctx.fillStyle = "#ffaa00";
       ctx.fillRect(-16, -3, 5, 6);
     }
+
+    ctx.restore();
+  }
+
+  function dibujarPowerup(x, y, now) {
+    const pulso = 0.5 + 0.5 * Math.sin(now / 180);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(now / 500);
+
+    ctx.shadowColor = "#fff23d";
+    ctx.shadowBlur = 14 + pulso * 10;
+    ctx.strokeStyle = "#fff23d";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16 + pulso * 3, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.rotate(-now / 500 * 2);
+    ctx.fillStyle = "#fff23d";
+    ctx.beginPath();
+    ctx.moveTo(3, -10);
+    ctx.lineTo(-6, 2);
+    ctx.lineTo(-1, 2);
+    ctx.lineTo(-3, 10);
+    ctx.lineTo(6, -2);
+    ctx.lineTo(1, -2);
+    ctx.closePath();
+    ctx.fill();
 
     ctx.restore();
   }
@@ -3778,7 +4186,7 @@ class TechnoSim {
     ctx.font = "12px monospace";
     ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
     ctx.textAlign = "center";
-    ctx.fillText("WASD / Flechas = Girar 90° · ESPACIO = Turbo Boost", K.W / 2, 34);
+    ctx.fillText("WASD / Flechas = Girar 90° · ESPACIO = Turbo Boost · ⚡ = Acelerón sorpresa", K.W / 2, 34);
 
     ctx.restore();
   }

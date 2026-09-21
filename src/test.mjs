@@ -156,6 +156,69 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   tr.step(1 / 120);
   t("tron: moto gira al norte", tr.motos[1].dir === "N");
   t("tron: estela registra punto de giro", tr.estelas[1].length >= 2);
+
+  // Regresion: girar no debe autodestruir la moto por un falso positivo de
+  // colision consigo misma (bug: dos segmentos perpendiculares que comparten
+  // el vertice del giro registraban una interseccion espuria en la mitad de
+  // los giros, segun su sentido). Probamos los 4 giros posibles desde cada
+  // direccion inicial y confirmamos que la moto sigue viva varios frames despues.
+  const direcciones = ["N", "S", "E", "W"];
+  for (const dIni of direcciones) {
+    for (const dGiro of direcciones) {
+      if (dGiro === dIni) continue;
+      const opuestos = { N: "S", S: "N", E: "W", W: "E" };
+      if (dGiro === opuestos[dIni]) continue; // giro de 180 no esta permitido
+      const trg = new A.TronSim();
+      trg.motos[1].dir = dIni;
+      trg.motos[1].dirPendiente = dIni;
+      for (let i = 0; i < 120 * 2; i++) trg.step(1 / 120);
+      trg.aplicarInputHost({ dir: dGiro, turbo: false });
+      for (let i = 0; i < 15; i++) trg.step(1 / 120);
+      t(`tron: girar de ${dIni} a ${dGiro} no autodestruye por falso positivo`, trg.motos[1].viva === true);
+    }
+  }
+
+  // Una colision real contra la propia estela (bucle cerrado) SI debe matar.
+  {
+    const trs = new A.TronSim();
+    for (let i = 0; i < 120 * 2; i++) trs.step(1 / 120);
+    const secuencia = [["S", 60], ["W", 60], ["N", 60], ["E", 200]];
+    let murioPorBucle = false;
+    for (const [dir, frames] of secuencia) {
+      trs.aplicarInputHost({ dir, turbo: false });
+      for (let i = 0; i < frames; i++) {
+        trs.step(1 / 120);
+        if (!trs.motos[1].viva) { murioPorBucle = true; break; }
+      }
+      if (murioPorBucle) break;
+    }
+    t("tron: un bucle cerrado real SI colisiona contra la propia estela", murioPorBucle === true);
+  }
+
+  // Power-up de acelerón: aparece, se puede recolectar y otorga boost temporal.
+  {
+    const trp = new A.TronSim();
+    for (let i = 0; i < 120 * 2; i++) trp.step(1 / 120);
+    trp.powerupEn = 0.001;
+    trp.step(1 / 120);
+    t("tron: el power-up aparece cuando el contador llega a 0", trp.powerup !== null);
+
+    // Forzamos a la moto 1 justo sobre el power-up y verificamos que lo recoge.
+    trp.motos[1].x = trp.powerup.x;
+    trp.motos[1].y = trp.powerup.y;
+    trp.step(1 / 120);
+    t("tron: recoger el power-up otorga boostVal", trp.motos[1].boostVal > 0);
+    t("tron: el power-up desaparece tras ser recogido", trp.powerup === null);
+
+    const snap = trp.snapshot();
+    t("tron: el snapshot marca a la moto 1 en estado boost", snap.m1.boost === true);
+    t("tron: el snapshot informa quien tomo el power-up", Array.isArray(snap.boostTomado) && snap.boostTomado.includes(1));
+
+    const x0 = trp.motos[1].x;
+    trp.step(1 / 120);
+    const avance = trp.motos[1].x - x0;
+    t("tron: durante el boost la moto viaja mas rapido que la velocidad base", avance > (A.TRON.VEL_BASE / 120) * 1.5);
+  }
 }
 
 // ================= MONOPOLY =================

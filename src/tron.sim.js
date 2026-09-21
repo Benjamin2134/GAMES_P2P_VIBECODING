@@ -14,7 +14,15 @@ const TRON = {
   RONDAS_GANAR: 5,
   PAUSA_RONDA_S: 1.8,
   COL_P1: "#00f0ff",
-  COL_P2: "#ff0055"
+  COL_P2: "#ff0055",
+  // Power-up de "acelerón sorpresa": aparece cada tanto en un punto aleatorio
+  // de la arena; el primero que lo toca gana un chorro de velocidad temporal.
+  POWERUP_RADIO: 16,
+  POWERUP_MARGEN: 70,       // distancia minima a las paredes al aparecer
+  POWERUP_SPAWN_MIN_S: 5,
+  POWERUP_SPAWN_MAX_S: 9,
+  BOOST_VEL: 620,           // px / seg mientras dura el acelerón
+  BOOST_DUR_S: 2.2
 };
 
 const DIR_VECS = {
@@ -42,8 +50,8 @@ class TronSim {
   iniciarRonda() {
     const yIni = TRON.H / 2;
     this.motos = {
-      1: { x: 160, y: yIni, dir: "E", dirPendiente: "E", turbo: false, turboVal: TRON.TURBO_MAX, viva: true },
-      2: { x: TRON.W - 160, y: yIni, dir: "W", dirPendiente: "W", turbo: false, turboVal: TRON.TURBO_MAX, viva: true }
+      1: { x: 160, y: yIni, dir: "E", dirPendiente: "E", turbo: false, turboVal: TRON.TURBO_MAX, boostVal: 0, viva: true },
+      2: { x: TRON.W - 160, y: yIni, dir: "W", dirPendiente: "W", turbo: false, turboVal: TRON.TURBO_MAX, boostVal: 0, viva: true }
     };
     this.estelas = {
       1: [{ x: 160, y: yIni }],
@@ -53,6 +61,17 @@ class TronSim {
     this.sirviendo = true;
     this.reinicioEn = 0;
     this.explosiones = [];
+    this.powerup = null;
+    this.powerupEn = TRON.POWERUP_SPAWN_MIN_S + Math.random() * (TRON.POWERUP_SPAWN_MAX_S - TRON.POWERUP_SPAWN_MIN_S);
+    this.boostTomado = [];
+  }
+
+  _spawnPowerup() {
+    const m = TRON.POWERUP_MARGEN;
+    this.powerup = {
+      x: m + Math.random() * (TRON.W - 2 * m),
+      y: m + Math.random() * (TRON.H - 2 * m)
+    };
   }
 
   aplicarInputHost(inp) { this._procesarInput(1, inp); }
@@ -95,6 +114,12 @@ class TronSim {
       return;
     }
 
+    // Aparición periódica del power-up de acelerón
+    if (!this.powerup) {
+      this.powerupEn -= dt;
+      if (this.powerupEn <= 0) this._spawnPowerup();
+    }
+
     const colisiones = { 1: false, 2: false };
 
     for (let id = 1; id <= 2; id++) {
@@ -108,7 +133,10 @@ class TronSim {
       }
 
       let vel = TRON.VEL_BASE;
-      if (m.turbo && m.turboVal > 5) {
+      if (m.boostVal > 0) {
+        m.boostVal = Math.max(0, m.boostVal - dt);
+        vel = TRON.BOOST_VEL;
+      } else if (m.turbo && m.turboVal > 5) {
         vel = TRON.VEL_TURBO;
         m.turboVal = Math.max(0, m.turboVal - TRON.TURBO_GASTO * dt);
       } else {
@@ -119,6 +147,17 @@ class TronSim {
       const prevX = m.x, prevY = m.y;
       m.x += vec.x * vel * dt;
       m.y += vec.y * vel * dt;
+
+      // Recolección del power-up de acelerón
+      if (this.powerup) {
+        const dPow = Math.hypot(m.x - this.powerup.x, m.y - this.powerup.y);
+        if (dPow < TRON.POWERUP_RADIO + 9) {
+          m.boostVal = TRON.BOOST_DUR_S;
+          this.powerup = null;
+          this.powerupEn = TRON.POWERUP_SPAWN_MIN_S + Math.random() * (TRON.POWERUP_SPAWN_MAX_S - TRON.POWERUP_SPAWN_MIN_S);
+          this.boostTomado.push(id);
+        }
+      }
 
       // Límites de arena
       if (m.x <= 8 || m.x >= TRON.W - 8 || m.y <= 8 || m.y >= TRON.H - 8) {
@@ -184,8 +223,13 @@ class TronSim {
     if (!pts || pts.length === 0) return false;
 
     const todos = [...pts, { x: m.x, y: m.y }];
-    // Si es la propia estela, ignoramos los 2 últimos segmentos más cercanos a la cabeza
-    const limite = esPropia ? todos.length - 2 : todos.length - 1;
+    // Si es la propia estela, ignoramos los 2 últimos segmentos más cercanos a la cabeza:
+    // el segmento que se está dibujando ahora mismo Y el segmento anterior que
+    // comparte el vértice del último giro. Ese vértice compartido (dos segmentos
+    // perpendiculares que se tocan en un punto) hacía que el test de intersección
+    // por CCW diera un falso positivo justo al girar, en la mitad de los giros
+    // (según su sentido horario/antihorario) — la moto se "chocaba sola" al girar.
+    const limite = esPropia ? todos.length - 3 : todos.length - 1;
 
     for (let i = 0; i < limite; i++) {
       const pA = todos[i];
@@ -212,8 +256,8 @@ class TronSim {
 
     return {
       seq: this.seq,
-      m1: { x: Math.round(m1.x), y: Math.round(m1.y), dir: m1.dir, turbo: m1.turbo, tb: Math.round(m1.turboVal), viva: m1.viva },
-      m2: { x: Math.round(m2.x), y: Math.round(m2.y), dir: m2.dir, turbo: m2.turbo, tb: Math.round(m2.turboVal), viva: m2.viva },
+      m1: { x: Math.round(m1.x), y: Math.round(m1.y), dir: m1.dir, turbo: m1.turbo, tb: Math.round(m1.turboVal), boost: m1.boostVal > 0, viva: m1.viva },
+      m2: { x: Math.round(m2.x), y: Math.round(m2.y), dir: m2.dir, turbo: m2.turbo, tb: Math.round(m2.turboVal), boost: m2.boostVal > 0, viva: m2.viva },
       e1: this.estelas[1],
       e2: this.estelas[2],
       p1: this.puntos[1],
@@ -223,7 +267,9 @@ class TronSim {
       ganador: this.ganador,
       rev1: this.revancha[1],
       rev2: this.revancha[2],
-      expl: this.explosiones.length ? this.explosiones.splice(0) : null
+      expl: this.explosiones.length ? this.explosiones.splice(0) : null,
+      powerup: this.powerup,
+      boostTomado: this.boostTomado.length ? this.boostTomado.splice(0) : null
     };
   }
 }

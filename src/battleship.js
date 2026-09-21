@@ -20,8 +20,7 @@
   // Estado local para colocación de barcos
   const L = {
     flotaLocal: [],
-    barcoSeleccionadoIdx: 0,
-    horiz: true,
+    barcoSeleccionadoIdx: null, // null = ningún barco seleccionado
     confirmadoLocal: false,
     hoverX: -1,
     hoverY: -1,
@@ -29,6 +28,8 @@
     sonarSweepAng: 0,
     animImpacto: null
   };
+
+  const FLECHA_R = 13; // radio de los botones circulares de rotación
 
   function inicializarFlotaLocal() {
     L.flotaLocal = [
@@ -38,7 +39,97 @@
       { id: "submarine", nombre: "Submarino", tam: 3, x: 0, y: 6, horiz: true },
       { id: "destroyer", nombre: "Destructor", tam: 2, x: 0, y: 8, horiz: true }
     ];
+    L.barcoSeleccionadoIdx = null;
     L.confirmadoLocal = false;
+  }
+
+  // --- Helpers de geometría de la flota (colocación) ---
+  function ocupaCelda(barco, cx, cy) {
+    for (let i = 0; i < barco.tam; i++) {
+      const x = barco.horiz ? barco.x + i : barco.x;
+      const y = barco.horiz ? barco.y : barco.y + i;
+      if (x === cx && y === cy) return true;
+    }
+    return false;
+  }
+
+  function posicionValida(flota, idxExcluir, x, y, tam, horiz) {
+    if (x < 0 || y < 0) return false;
+    if (horiz && x + tam > 10) return false;
+    if (!horiz && y + tam > 10) return false;
+    for (let i = 0; i < tam; i++) {
+      const cx = horiz ? x + i : x;
+      const cy = horiz ? y : y + i;
+      for (let j = 0; j < flota.length; j++) {
+        if (j === idxExcluir) continue;
+        if (ocupaCelda(flota[j], cx, cy)) return false;
+      }
+    }
+    return true;
+  }
+
+  function moverBarcoSeleccionado(cx, cy) {
+    const idx = L.barcoSeleccionadoIdx;
+    const barco = L.flotaLocal[idx];
+    if (!barco) return;
+    if (posicionValida(L.flotaLocal, idx, cx, cy, barco.tam, barco.horiz)) {
+      barco.x = cx;
+      barco.y = cy;
+      RetroAudio.playPongBeep(false);
+    } else {
+      RetroAudio.playError();
+    }
+  }
+
+  // Rota el barco seleccionado 90° pivotando sobre su propio centro, con
+  // ajuste a los límites del tablero y validación de solapamiento. Si no
+  // entra en ninguna posición cercana, la rotación se rechaza (sonido de error).
+  function rotarBarcoSeleccionado(sentidoHorario) {
+    const idx = L.barcoSeleccionadoIdx;
+    const barco = L.flotaLocal[idx];
+    if (!barco) return;
+
+    const tam = barco.tam;
+    const nuevoHoriz = !barco.horiz;
+    const w = barco.horiz ? tam : 1;
+    const h = barco.horiz ? 1 : tam;
+    const centerX = barco.x + (w - 1) / 2;
+    const centerY = barco.y + (h - 1) / 2;
+
+    let nx, ny;
+    if (nuevoHoriz) {
+      nx = Math.round(centerX - (tam - 1) / 2);
+      ny = Math.round(centerY);
+    } else {
+      nx = Math.round(centerX);
+      ny = Math.round(centerY - (tam - 1) / 2);
+    }
+    nx = Math.max(0, Math.min(nx, nuevoHoriz ? 10 - tam : 9));
+    ny = Math.max(0, Math.min(ny, nuevoHoriz ? 9 : 10 - tam));
+
+    if (posicionValida(L.flotaLocal, idx, nx, ny, tam, nuevoHoriz)) {
+      barco.x = nx;
+      barco.y = ny;
+      barco.horiz = nuevoHoriz;
+      RetroAudio.playPongBeep(sentidoHorario);
+    } else {
+      RetroAudio.playError();
+    }
+  }
+
+  // Posición en pantalla de los dos botones de rotación (CCW/CW) del barco
+  // seleccionado: justo al costado de su centro, con el eje perpendicular
+  // a su orientación actual, y siempre dentro del área del tablero propio.
+  function posicionFlechas(barco) {
+    const w = barco.horiz ? barco.tam : 1;
+    const h = barco.horiz ? 1 : barco.tam;
+    let cx = TAB_PROPIO.x + (barco.x + w / 2) * CELL;
+    let cy = TAB_PROPIO.y + (barco.y + h / 2) * CELL;
+    if (barco.horiz) cy += (h * CELL) / 2 + 20;
+    else cx += (w * CELL) / 2 + 20;
+    cx = Math.min(Math.max(cx, TAB_PROPIO.x + 18), TAB_PROPIO.x + GRID_PX - 18);
+    cy = Math.min(Math.max(cy, TAB_PROPIO.y + 18), TAB_PROPIO.y + GRID_PX - 18);
+    return { ccwX: cx - 16, ccwY: cy, cwX: cx + 16, cwY: cy };
   }
 
   function mouseXY(e) {
@@ -86,8 +177,8 @@
 
     // 1. Botones de Fase de Colocación
     if (fase === "colocacion" && !L.confirmadoLocal) {
-      // Botón Aleatorio (x: 70, y: 470, w: 140, h: 36)
-      if (m.x >= 70 && m.x <= 210 && m.y >= 470 && m.y <= 506) {
+      // Botón Aleatorio (x: 70, y: 470, w: 160, h: 36)
+      if (m.x >= 70 && m.x <= 230 && m.y >= 470 && m.y <= 506) {
         if (net.rol === 1 && sim) {
           L.flotaLocal = sim.generarFlotaAleatoria();
         } else {
@@ -95,37 +186,33 @@
           const tempSim = new BattleshipSim();
           L.flotaLocal = tempSim.generarFlotaAleatoria();
         }
+        L.barcoSeleccionadoIdx = null;
         RetroAudio.playPongBeep(true);
         return;
       }
 
-      // Botón Rotar (x: 220, y: 470, w: 100, h: 36)
-      if (m.x >= 220 && m.x <= 320 && m.y >= 470 && m.y <= 506) {
-        L.horiz = !L.horiz;
-        RetroAudio.playPongBeep(false);
-        return;
-      }
-
-      // Botón Confirmar Flota (x: 330, y: 470, w: 180, h: 36)
-      if (m.x >= 330 && m.x <= 510 && m.y >= 470 && m.y <= 506) {
+      // Botón Confirmar Flota (x: 250, y: 470, w: 220, h: 36)
+      if (m.x >= 250 && m.x <= 470 && m.y >= 470 && m.y <= 506) {
         confirmarFlota();
         return;
       }
 
-      // Clic en tablero propio para reposicionar barco
+      // Flechas de rotación del barco seleccionado (si hay uno)
+      if (L.barcoSeleccionadoIdx !== null && L.flotaLocal[L.barcoSeleccionadoIdx]) {
+        const f = posicionFlechas(L.flotaLocal[L.barcoSeleccionadoIdx]);
+        if (Math.hypot(m.x - f.ccwX, m.y - f.ccwY) <= FLECHA_R) { rotarBarcoSeleccionado(false); return; }
+        if (Math.hypot(m.x - f.cwX, m.y - f.cwY) <= FLECHA_R) { rotarBarcoSeleccionado(true); return; }
+      }
+
+      // Clic en tablero propio: seleccionar un barco, o mover el ya seleccionado
       const cPropio = celdaDesdePos(m.x, m.y, TAB_PROPIO);
       if (cPropio) {
-        const barco = L.flotaLocal[L.barcoSeleccionadoIdx];
-        if (barco) {
-          const maxX = L.horiz ? 10 - barco.tam : 9;
-          const maxY = L.horiz ? 9 : 10 - barco.tam;
-          if (cPropio.cx <= maxX && cPropio.cy <= maxY) {
-            barco.x = cPropio.cx;
-            barco.y = cPropio.cy;
-            barco.horiz = L.horiz;
-            L.barcoSeleccionadoIdx = (L.barcoSeleccionadoIdx + 1) % L.flotaLocal.length;
-            RetroAudio.playPongBeep(false);
-          }
+        const idxClic = L.flotaLocal.findIndex(b => ocupaCelda(b, cPropio.cx, cPropio.cy));
+        if (idxClic >= 0) {
+          L.barcoSeleccionadoIdx = idxClic;
+          RetroAudio.playPongBeep(false);
+        } else if (L.barcoSeleccionadoIdx !== null) {
+          moverBarcoSeleccionado(cPropio.cx, cPropio.cy);
         }
         return;
       }
@@ -140,14 +227,16 @@
     }
   }
 
-  function onKeyDown(e) {
-    if (e.key === "r" || e.key === "R") {
-      L.horiz = !L.horiz;
-      RetroAudio.playPongBeep(false);
-    }
-  }
-
   function confirmarFlota() {
+    // Chequeo local defensivo: si por algún motivo la flota quedara inválida
+    // (solapada o fuera de rango), no la bloqueamos como confirmada — eso
+    // dejaría al jugador sin poder editar y a la partida sin arrancar nunca.
+    const tempSim = (net.rol === 1 && sim) ? sim : new BattleshipSim();
+    if (!tempSim.validarFlota(L.flotaLocal)) {
+      RetroAudio.playError();
+      return;
+    }
+
     L.confirmadoLocal = true;
     RetroAudio.playSonar();
 
@@ -212,7 +301,6 @@
       inicializarFlotaLocal();
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKeyDown);
     },
 
     iniciarGuest() {
@@ -221,7 +309,6 @@
       inicializarFlotaLocal();
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKeyDown);
     },
 
     destruir() {
@@ -229,7 +316,6 @@
       snap = null;
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
     },
 
     onData(msg) {
@@ -331,6 +417,7 @@
     // 4. Render Controles de Colocación
     if (fase === "colocacion") {
       renderPanelColocacion();
+      renderSeleccionYFlechas();
     }
   }
 
@@ -350,7 +437,7 @@
       ctx.fillStyle = "#88b090";
       const estadoMsg = miListo
         ? (rivalListo ? "¡Ambas flotas listas! Iniciando combate..." : "Esperando que el rival confirme su flota...")
-        : "Posiciona tus 5 buques de combate y presiona [CONFIRMAR FLOTA]";
+        : "Click en un barco para seleccionarlo y rotarlo · click en otra celda para moverlo";
       ctx.fillText(estadoMsg, K.W / 2, 65);
     } else if (fase === "combate") {
       const miTurno = esMiTurno();
@@ -518,26 +605,65 @@
     ctx.fillStyle = "rgba(0, 255, 102, 0.1)";
     ctx.strokeStyle = "#39ff14";
     ctx.lineWidth = 1.5;
-    ctx.fillRect(70, 470, 140, 36);
-    ctx.strokeRect(70, 470, 140, 36);
+    ctx.fillRect(70, 470, 160, 36);
+    ctx.strokeRect(70, 470, 160, 36);
 
     ctx.font = "bold 12px monospace";
     ctx.fillStyle = "#39ff14";
     ctx.textAlign = "center";
-    ctx.fillText("🎲 ALEATORIO", 140, 493);
+    ctx.fillText("🎲 ALEATORIO", 150, 493);
 
-    // Botón 2: Rotar
-    ctx.fillStyle = "rgba(0, 255, 102, 0.1)";
-    ctx.fillRect(220, 470, 100, 36);
-    ctx.strokeRect(220, 470, 100, 36);
-    ctx.fillText(L.horiz ? "🔄 HORIZ (R)" : "🔄 VERT (R)", 270, 493);
-
-    // Botón 3: Confirmar Flota
+    // Botón 2: Confirmar Flota
     ctx.fillStyle = "#39ff14";
-    ctx.fillRect(330, 470, 180, 36);
+    ctx.fillRect(250, 470, 220, 36);
     ctx.fillStyle = "#000000";
-    ctx.fillText("⚓ CONFIRMAR FLOTA", 420, 493);
+    ctx.fillText("⚓ CONFIRMAR FLOTA", 360, 493);
 
+    ctx.restore();
+  }
+
+  // Resalta el barco seleccionado y dibuja sus dos botones de rotación
+  // (sentido horario / antihorario) justo al costado.
+  function renderSeleccionYFlechas() {
+    if (L.confirmadoLocal) return;
+    if (L.barcoSeleccionadoIdx === null) return;
+    const barco = L.flotaLocal[L.barcoSeleccionadoIdx];
+    if (!barco) return;
+
+    const w = barco.horiz ? barco.tam * CELL - 4 : CELL - 4;
+    const h = barco.horiz ? CELL - 4 : barco.tam * CELL - 4;
+    const bx = TAB_PROPIO.x + barco.x * CELL + 2;
+    const by = TAB_PROPIO.y + barco.y * CELL + 2;
+
+    ctx.save();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 8;
+    ctx.strokeRect(bx - 3, by - 3, w + 6, h + 6);
+    ctx.restore();
+
+    const f = posicionFlechas(barco);
+    dibujarFlechaRotacion(f.ccwX, f.ccwY, "↺");
+    dibujarFlechaRotacion(f.cwX, f.cwY, "↻");
+  }
+
+  function dibujarFlechaRotacion(cx, cy, glifo) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, FLECHA_R, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 20, 10, 0.9)";
+    ctx.fill();
+    ctx.strokeStyle = "#39ff14";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.font = "bold 16px monospace";
+    ctx.fillStyle = "#39ff14";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(glifo, cx, cy + 1);
     ctx.restore();
   }
 })();

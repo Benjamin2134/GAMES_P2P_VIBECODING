@@ -78,6 +78,7 @@
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
       window.addEventListener("keyup", onKeyUp);
+      RetroAudio.startMusicLoop();
     },
 
     iniciarGuest() {
@@ -89,6 +90,7 @@
       inputLocal.turbo = false;
       window.addEventListener("keydown", onKeyDown);
       window.addEventListener("keyup", onKeyUp);
+      RetroAudio.startMusicLoop();
     },
 
     destruir() {
@@ -96,6 +98,7 @@
       snap = null;
       particulas = [];
       RetroAudio.stopThrust();
+      RetroAudio.stopMusicLoop();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     },
@@ -118,6 +121,9 @@
           snap.expl.forEach(exp => crearExplosionParticulas(exp.x, exp.y, exp.col));
           RetroAudio.playExplosion();
         }
+        if (snap.boostTomado && snap.boostTomado.length) {
+          RetroAudio.playPowerup();
+        }
       }
     },
 
@@ -128,6 +134,9 @@
           if (sim.explosiones.length) {
             sim.explosiones.forEach(exp => crearExplosionParticulas(exp.x, exp.y, exp.col));
             RetroAudio.playExplosion();
+          }
+          if (sim.boostTomado.length) {
+            RetroAudio.playPowerup();
           }
         }
         snap = sim.snapshot();
@@ -143,7 +152,7 @@
         sirviendoPrevio = snap.sirviendo;
       }
 
-      renderTron(dtSeg);
+      renderTron(now, dtSeg);
     },
 
     overlay() {
@@ -174,7 +183,7 @@
   // ==========================================================================
   //  RENDERIZADO CANVAS 2D (Estética Cyber Neon 1982)
   // ==========================================================================
-  function renderTron(dtSeg) {
+  function renderTron(now, dtSeg) {
     ctx.fillStyle = "#04060f";
     ctx.fillRect(0, 0, K.W, K.H);
 
@@ -192,8 +201,10 @@
     dibujarEstela(snap.e1, snap.m1, K.COL_P1);
     dibujarEstela(snap.e2, snap.m2, K.COL_P2);
 
-    if (snap.m1 && snap.m1.viva) dibujarMoto(snap.m1.x, snap.m1.y, snap.m1.dir, K.COL_P1, snap.m1.turbo);
-    if (snap.m2 && snap.m2.viva) dibujarMoto(snap.m2.x, snap.m2.y, snap.m2.dir, K.COL_P2, snap.m2.turbo);
+    if (snap.powerup) dibujarPowerup(snap.powerup.x, snap.powerup.y, now);
+
+    if (snap.m1 && snap.m1.viva) dibujarMoto(snap.m1.x, snap.m1.y, snap.m1.dir, K.COL_P1, snap.m1.turbo, snap.m1.boost);
+    if (snap.m2 && snap.m2.viva) dibujarMoto(snap.m2.x, snap.m2.y, snap.m2.dir, K.COL_P2, snap.m2.turbo, snap.m2.boost);
 
     renderParticulas(dtSeg);
     renderHUD();
@@ -239,7 +250,7 @@
     ctx.restore();
   }
 
-  function dibujarMoto(x, y, dir, color, turbo) {
+  function dibujarMoto(x, y, dir, color, turbo, boost) {
     ctx.save();
     ctx.translate(x, y);
 
@@ -251,8 +262,8 @@
     ctx.rotate(rad);
 
     ctx.fillStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 12;
+    ctx.shadowColor = boost ? "#fff23d" : color;
+    ctx.shadowBlur = boost ? 24 : 12;
 
     ctx.beginPath();
     ctx.moveTo(10, 0);
@@ -266,10 +277,49 @@
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(4, -2, 6, 4);
 
-    if (turbo) {
+    if (boost) {
+      ctx.fillStyle = "#fff23d";
+      ctx.shadowColor = "#fff23d";
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.moveTo(-12, -4);
+      ctx.lineTo(-24, 0);
+      ctx.lineTo(-12, 4);
+      ctx.closePath();
+      ctx.fill();
+    } else if (turbo) {
       ctx.fillStyle = "#ffaa00";
       ctx.fillRect(-16, -3, 5, 6);
     }
+
+    ctx.restore();
+  }
+
+  function dibujarPowerup(x, y, now) {
+    const pulso = 0.5 + 0.5 * Math.sin(now / 180);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(now / 500);
+
+    ctx.shadowColor = "#fff23d";
+    ctx.shadowBlur = 14 + pulso * 10;
+    ctx.strokeStyle = "#fff23d";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16 + pulso * 3, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.rotate(-now / 500 * 2);
+    ctx.fillStyle = "#fff23d";
+    ctx.beginPath();
+    ctx.moveTo(3, -10);
+    ctx.lineTo(-6, 2);
+    ctx.lineTo(-1, 2);
+    ctx.lineTo(-3, 10);
+    ctx.lineTo(6, -2);
+    ctx.lineTo(1, -2);
+    ctx.closePath();
+    ctx.fill();
 
     ctx.restore();
   }
@@ -334,7 +384,7 @@
     ctx.font = "12px monospace";
     ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
     ctx.textAlign = "center";
-    ctx.fillText("WASD / Flechas = Girar 90° · ESPACIO = Turbo Boost", K.W / 2, 34);
+    ctx.fillText("WASD / Flechas = Girar 90° · ESPACIO = Turbo Boost · ⚡ = Acelerón sorpresa", K.W / 2, 34);
 
     ctx.restore();
   }
