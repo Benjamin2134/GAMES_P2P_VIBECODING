@@ -605,6 +605,7 @@
     <div class="sub">Sala de <b id="nombreJuegoSala" style="color:#fff">—</b>. Pasale este código a tu amigo:</div>
     <div id="codigoSala" class="codigo">····</div>
     <div id="estadoHost" class="sub">Iniciando…</div>
+    <button id="btnJugarBot" class="btn-unirte oculto" style="margin-top: 4px;">🤖 Jugar contra BOT ahora</button>
     <button id="btnCancelar" class="btn-secondary">Cancelar</button>
   </div>
 </div>
@@ -660,8 +661,10 @@
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 
-// Registro de juegos. Cada modulo hace  JUEGOS.xxx = { ... }
+// Registro de juegos y bots. Cada modulo hace JUEGOS.xxx = { ... } y BOTS.xxx = { ... }
 const JUEGOS = {};
+const BOTS = {};
+
 
 
 // ==========================================================================
@@ -2793,6 +2796,344 @@ class TechnoSim {
 
 
 // ==========================================================================
+//  Bot Universal: SPACEWAR 1979 (src/spacewar.bot.js)
+//  Heurística newtoniana arcade: intercepción balística, evasión y wrap-around.
+// ==========================================================================
+"use strict";
+
+const SpacewarBot = {
+  // Estado interno liviano del bot (timers de reflejo)
+  _reaccionTimer: 0,
+  _ultimoInput: { rot: 0, thrust: false, fire: false },
+
+  step(sim, dt) {
+    if (!sim || sim.ganador) return;
+    const me = sim.naves && sim.naves[2];
+    const rival = sim.naves && sim.naves[1];
+
+    // Si el bot o el rival están en respawn / muertos
+    if (!me || !me.viva || !rival || !rival.viva) {
+      sim.aplicarInputGuest({ rot: 0, thrust: false, fire: false });
+      return;
+    }
+
+    // 1. Vector de posición en toroide (wrap-around 880x540)
+    let dx = rival.x - me.x;
+    if (dx > SW.W / 2) dx -= SW.W;
+    else if (dx < -SW.W / 2) dx += SW.W;
+
+    let dy = rival.y - me.y;
+    if (dy > SW.H / 2) dy -= SW.H;
+    else if (dy < -SW.H / 2) dy += SW.H;
+
+    const dist = Math.hypot(dx, dy);
+
+    // 2. Predicción de tiro (Lead Target): calcula dónde estará el rival
+    const tVuelo = Math.min(dist / SW.BALA_VEL, 1.2);
+    const fx = dx + (rival.vx - me.vx * 0.4) * tVuelo;
+    const fy = dy + (rival.vy - me.vy * 0.4) * tVuelo;
+    const angDeseado = Math.atan2(fy, fx);
+
+    // 3. Rotación hacia el blanco
+    let diff = angDeseado - me.ang;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+
+    let rot = 0;
+    if (diff > 0.08) rot = 1;
+    else if (diff < -0.08) rot = -1;
+
+    // 4. Decisión de Disparo: alineado y a rango útil
+    const alineado = Math.abs(diff) < 0.22; // ~12.6 grados de tolerancia
+    const fire = alineado && dist < 620 && (!rival.invuln || rival.invuln <= 0);
+
+    // 5. Decisión de Empuje (Thrust newtoniano): no embalarse sin control
+    const velActual = Math.hypot(me.vx, me.vy);
+    let thrust = false;
+
+    // Si está lejos y apuntando en dirección general, dar impulso
+    if (dist > 230 && Math.abs(diff) < 0.65 && velActual < 280) {
+      thrust = true;
+    }
+
+    // 6. Evasión de proyectiles enemigos cercanos (peligro inminente < 90px)
+    if (sim.balas && sim.balas.length > 0) {
+      for (let i = 0; i < sim.balas.length; i++) {
+        const b = sim.balas[i];
+        if (b.d === 1) {
+          let bdx = b.x - me.x;
+          if (bdx > SW.W / 2) bdx -= SW.W;
+          else if (bdx < -SW.W / 2) bdx += SW.W;
+
+          let bdy = b.y - me.y;
+          if (bdy > SW.H / 2) bdy -= SW.H;
+          else if (bdy < -SW.H / 2) bdy += SW.H;
+
+          if (Math.hypot(bdx, bdy) < 90) {
+            // Evasión de emergencia: impulso lateral
+            thrust = true;
+            if (rot === 0) rot = 1;
+            break;
+          }
+        }
+      }
+    }
+
+    const inputFinal = { rot, thrust, fire };
+    sim.aplicarInputGuest(inputFinal);
+    return inputFinal;
+  }
+};
+
+// Registro automático en el motor arcade
+if (typeof BOTS !== "undefined") {
+  BOTS.spacewar = SpacewarBot;
+}
+
+// Export para Node.js / test.mjs
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { SpacewarBot };
+}
+
+
+// ==========================================================================
+//  Bot Universal: BATTLESHIP (src/battleship.bot.js)
+//  Heurística clásica Hunt & Target con paridad de tablero (Checkerboard)
+//  y seguimiento direccional ortogonal. Cumple Fair Play (cero trampas).
+// ==========================================================================
+"use strict";
+
+const BattleshipBot = {
+  // Estado interno del bot
+  _timerAcc: 0,
+  _delayActual: 0.6,
+  _impactosPendientes: [], // Array de {x, y} de impactos vivos sin hundir
+  _colaObjetivos: [],     // Array de {x, y} prioritarios en modo Target
+  _modo: "hunt",          // "hunt" | "target"
+  _flotaConfirmada: false,
+
+  reset() {
+    this._timerAcc = 0;
+    this._delayActual = 0.5 + Math.random() * 0.4;
+    this._impactosPendientes = [];
+    this._colaObjetivos = [];
+    this._modo = "hunt";
+    this._flotaConfirmada = false;
+  },
+
+  // Genera candidatos ortogonales válidos y no disparados
+  _obtenerVecinosValidos(cx, cy, tablero) {
+    const deltas = [
+      { x: cx + 1, y: cy },
+      { x: cx - 1, y: cy },
+      { x: cx, y: cy + 1 },
+      { x: cx, y: cy - 1 }
+    ];
+    return deltas.filter(p =>
+      p.x >= 0 && p.x < 10 &&
+      p.y >= 0 && p.y < 10 &&
+      tablero[p.y][p.x] === 0
+    );
+  },
+
+  // Selecciona la siguiente coordenada de disparo cumpliendo Fair Play
+  // tablero = sim.disparos[1] (disparos recibidos por el humano; 0=libre, 1=agua, 2=impacto)
+  obtenerSiguienteDisparo(tablero) {
+    // 1. MODO TARGET: Si hay objetivos en cola, usar el primero libre
+    while (this._colaObjetivos.length > 0) {
+      const cand = this._colaObjetivos.shift();
+      if (cand.x >= 0 && cand.x < 10 && cand.y >= 0 && cand.y < 10) {
+        if (tablero[cand.y][cand.x] === 0) {
+          return cand;
+        }
+      }
+    }
+
+    // 2. Si no hay cola pero hay impactos pendientes:
+    if (this._impactosPendientes.length > 0) {
+      // Si hay 2 o más impactos, inferir la línea (Horizontal o Vertical)
+      if (this._impactosPendientes.length >= 2) {
+        const prim = this._impactosPendientes[0];
+        const todosMismoY = this._impactosPendientes.every(p => p.y === prim.y);
+        const todosMismoX = this._impactosPendientes.every(p => p.x === prim.x);
+
+        if (todosMismoY) {
+          // Línea horizontal: buscar extremos izquierdo y derecho
+          const xs = this._impactosPendientes.map(p => p.x).sort((a, b) => a - b);
+          const y = prim.y;
+          const extIzq = { x: xs[0] - 1, y };
+          const extDer = { x: xs[xs.length - 1] + 1, y };
+
+          const candidatos = [];
+          if (extIzq.x >= 0 && tablero[y][extIzq.x] === 0) candidatos.push(extIzq);
+          if (extDer.x < 10 && tablero[y][extDer.x] === 0) candidatos.push(extDer);
+
+          if (candidatos.length > 0) {
+            const elegido = candidatos.shift();
+            this._colaObjetivos = candidatos;
+            return elegido;
+          }
+        } else if (todosMismoX) {
+          // Línea vertical: buscar extremos arriba y abajo
+          const ys = this._impactosPendientes.map(p => p.y).sort((a, b) => a - b);
+          const x = prim.x;
+          const extArr = { x, y: ys[0] - 1 };
+          const extAba = { x, y: ys[ys.length - 1] + 1 };
+
+          const candidatos = [];
+          if (extArr.y >= 0 && tablero[extArr.y][x] === 0) candidatos.push(extArr);
+          if (extAba.y < 10 && tablero[extAba.y][x] === 0) candidatos.push(extAba);
+
+          if (candidatos.length > 0) {
+            const elegido = candidatos.shift();
+            this._colaObjetivos = candidatos;
+            return elegido;
+          }
+        }
+      }
+
+      // Si no están alineados o los extremos están bloqueados, buscar vecinos de cualquier impacto
+      for (const imp of this._impactosPendientes) {
+        const vecinos = this._obtenerVecinosValidos(imp.x, imp.y, tablero);
+        if (vecinos.length > 0) {
+          const elegido = vecinos.shift();
+          this._colaObjetivos = vecinos;
+          return elegido;
+        }
+      }
+    }
+
+    // 3. MODO HUNT: Caza por tablero de ajedrez / paridad (x + y) % 2 === 0
+    // Como el barco más pequeño mide 2 celdas, cualquier barco ocupa al menos una casilla par.
+    const casillasPar = [];
+    const casillasImpar = [];
+
+    for (let y = 0; y < 10; y++) {
+      for (let x = 0; x < 10; x++) {
+        if (tablero[y][x] === 0) {
+          if ((x + y) % 2 === 0) casillasPar.push({ x, y });
+          else casillasImpar.push({ x, y });
+        }
+      }
+    }
+
+    const bolsa = casillasPar.length > 0 ? casillasPar : casillasImpar;
+    if (bolsa.length === 0) return null;
+
+    // Seleccionar casilla al azar de la bolsa para variedad arcade
+    const idx = Math.floor(Math.random() * bolsa.length);
+    return bolsa[idx];
+  },
+
+  // Elimina de _impactosPendientes las celdas contiguas conectadas al último impacto
+  _removerBarcoHundido(ultimoX, ultimoY) {
+    if (this._impactosPendientes.length === 0) return;
+
+    // Buscar componente conexo ortogonal alrededor de (ultimoX, ultimoY)
+    const aRemover = new Set();
+    const cola = [{ x: ultimoX, y: ultimoY }];
+    aRemover.add(`${ultimoX},${ultimoY}`);
+
+    while (cola.length > 0) {
+      const act = cola.shift();
+      for (const p of this._impactosPendientes) {
+        const key = `${p.x},${p.y}`;
+        if (!aRemover.has(key)) {
+          const distManhattan = Math.abs(p.x - act.x) + Math.abs(p.y - act.y);
+          if (distManhattan === 1) {
+            aRemover.add(key);
+            cola.push(p);
+          }
+        }
+      }
+    }
+
+    this._impactosPendientes = this._impactosPendientes.filter(
+      p => !aRemover.has(`${p.x},${p.y}`)
+    );
+    this._colaObjetivos = [];
+
+    if (this._impactosPendientes.length === 0) {
+      this._modo = "hunt";
+    }
+  },
+
+  // Bucle de decisión por frame (llamado desde shell.js vía juego.botStep(dt))
+  step(sim, dt, onDisparo) {
+    if (!sim || sim.ganador) return;
+
+    // 1. FASE DE COLOCACIÓN: Confirmar flota automáticamente tras pequeño retardo
+    if (sim.fase === "colocacion") {
+      if (!sim.listos[2]) {
+        this._timerAcc += dt;
+        if (this._timerAcc >= 0.3) {
+          const flota = sim.generarFlotaAleatoria();
+          sim.confirmarFlota(2, flota);
+          this._flotaConfirmada = true;
+          this._timerAcc = 0;
+          this._delayActual = 0.7 + Math.random() * 0.4; // 700ms - 1100ms
+        }
+      }
+      return;
+    }
+
+    // 2. FASE DE COMBATE: Disparar en el turno del bot (Jugador 2)
+    if (sim.fase === "combate") {
+      if (sim.turno !== 2) {
+        this._timerAcc = 0;
+        return;
+      }
+
+      this._timerAcc += dt;
+      if (this._timerAcc < this._delayActual) {
+        return; // Esperando latencia de radar/sonar
+      }
+
+      // Tiempo cumplido: calcular disparo
+      const tableroRival = sim.disparos[1]; // Disparos recibidos por J1
+      const coord = this.obtenerSiguienteDisparo(tableroRival);
+      if (!coord) return;
+
+      const res = sim.disparar(2, coord.x, coord.y);
+      if (res.ok) {
+        if (res.resultado === "impacto") {
+          this._impactosPendientes.push({ x: coord.x, y: coord.y });
+          this._modo = "target";
+          // Mantiene turno: preparar siguiente tiro tras breve pausa
+          this._timerAcc = 0;
+          this._delayActual = 0.7 + Math.random() * 0.3;
+        } else if (res.resultado === "hundido" || res.resultado === "victoria") {
+          this._impactosPendientes.push({ x: coord.x, y: coord.y });
+          this._removerBarcoHundido(coord.x, coord.y);
+          // Mantiene turno (o fin de juego)
+          this._timerAcc = 0;
+          this._delayActual = 0.8 + Math.random() * 0.3;
+        } else {
+          // Agua: cambio de turno automático a Jugador 1
+          this._timerAcc = 0;
+          this._delayActual = 0.7 + Math.random() * 0.4;
+        }
+
+        if (typeof onDisparo === "function") {
+          onDisparo(coord.x, coord.y, res);
+        }
+      }
+    }
+  }
+};
+
+// Registro automático en el motor arcade
+if (typeof BOTS !== "undefined") {
+  BOTS.battleship = BattleshipBot;
+}
+
+// Export para Node.js / test.mjs
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { BattleshipBot };
+}
+
+
+// ==========================================================================
 //  Modulo de juego: PONG
 //  Netcode: paso fijo 120 Hz, snapshots binarios (31 B), canal no confiable,
 //  autoridad de cliente sobre la pala propia (0 ms) + limite de velocidad en
@@ -3484,6 +3825,12 @@ class TechnoSim {
     nombre: "Spacewar 1979",
     desc: "Duelo de naves con inercia. Girá, empujá, dispará. Primero en quedarse sin vidas pierde.",
     canvas: { w: SW.W, h: SW.H },
+    get sim() { return sim; },
+    botStep(dt) {
+      if (sim && typeof BOTS !== "undefined" && BOTS.spacewar) {
+        BOTS.spacewar.step(sim, dt);
+      }
+    },
 
     iniciarHost() { sim = new SpacewarSim(); hAcc = 0; hSend = 0; hLast = performance.now(); ganadorPrev = 0; enganchar(); },
     iniciarGuest() {
@@ -3585,7 +3932,10 @@ class TechnoSim {
       };
     },
     revancha() {
-      if (net.rol === 1 && sim) sim.pedirRevancha(1);
+      if (net.rol === 1 && sim) {
+        sim.pedirRevancha(1);
+        if (net.esBot) sim.pedirRevancha(2);
+      }
       else net.enviar(JSON.stringify({ t: "rev" }));
     },
   };
@@ -3657,7 +4007,8 @@ class TechnoSim {
     ctx.fillText((miNum === 1 ? "VOS ▸ " : "") + "P1 " + "▲".repeat(Math.max(0, s.n1.vd)), 20, 26);
     ctx.textAlign = "right";
     ctx.fillStyle = SW.COL_P2;
-    ctx.fillText("P2 " + "▲".repeat(Math.max(0, s.n2.vd)) + (miNum === 2 ? " ◂ VOS" : ""), SW.W - 20, 26);
+    const etiquetaP2 = (net.esBot ? "BOT " : "P2 ") + "▲".repeat(Math.max(0, s.n2.vd)) + (miNum === 2 ? " ◂ VOS" : "");
+    ctx.fillText(etiquetaP2, SW.W - 20, 26);
     ctx.textAlign = "left";
   }
 })();
@@ -3960,9 +4311,23 @@ class TechnoSim {
     desc: "Batalla naval clásica 10x10. Flota completa, radar de sonar, disparos balísticos y niebla de guerra.",
     canvas: { w: K.W, h: K.H },
 
+    get sim() { return sim; },
+
+    botStep(dt) {
+      if (net.rol === 1 && sim && typeof BOTS !== "undefined" && BOTS.battleship) {
+        BOTS.battleship.step(sim, dt, (cx, cy, res) => {
+          reproducirAudioResultado(res.resultado);
+          enviarSnapshot();
+        });
+      }
+    },
+
     iniciarHost() {
       sim = new BattleshipSim();
       snap = null;
+      if (typeof BOTS !== "undefined" && BOTS.battleship) {
+        BOTS.battleship.reset();
+      }
       inicializarFlotaLocal();
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerdown", onPointerDown);
@@ -4034,7 +4399,9 @@ class TechnoSim {
 
         return {
           texto: ganeYo ? "¡VICTORIA NAVAL!" : "FLOTA HUNDIDA",
-          sub: ganeYo ? "Has destruido todas las naves enemigas" : "El enemigo dominó los mares",
+          sub: ganeYo
+            ? (net.esBot ? "Has destruido la flota del Bot" : "Has destruido todas las naves enemigas")
+            : (net.esBot ? "El Bot naval dominó los mares" : "El enemigo dominó los mares"),
           revancha: true,
           revanchaPedida
         };
@@ -4045,6 +4412,12 @@ class TechnoSim {
     revancha() {
       if (net.rol === 1 && sim) {
         sim.pedirRevancha(1);
+        if (net.esBot) {
+          sim.pedirRevancha(2);
+          if (typeof BOTS !== "undefined" && BOTS.battleship) {
+            BOTS.battleship.reset();
+          }
+        }
         inicializarFlotaLocal();
         enviarSnapshot();
       } else {
@@ -4077,7 +4450,7 @@ class TechnoSim {
     renderTablero(TAB_PROPIO, "TU FLOTA / BASE NAVAL", true);
 
     // 3. Render Tablero Rival (Radar de Sonar)
-    renderTablero(TAB_RIVAL, "RADAR ENEMIGO (SONAR)", false);
+    renderTablero(TAB_RIVAL, net.esBot ? "RADAR ENEMIGO (BOT NAVAL)" : "RADAR ENEMIGO (SONAR)", false);
 
     // 4. Render Controles de Colocación
     if (fase === "colocacion") {
@@ -4094,6 +4467,7 @@ class TechnoSim {
       const listos = (net.rol === 1 && sim) ? sim.listos : (snap ? snap.listos : { 1: false, 2: false });
       const miListo = listos[net.rol];
       const rivalListo = listos[net.rol === 1 ? 2 : 1];
+      const nombreRival = net.esBot ? "el Bot" : "el rival";
 
       ctx.fillStyle = "#39ff14";
       ctx.fillText("FASE DE DESPLIEGUE TÁCTICO", K.W / 2, 40);
@@ -4101,13 +4475,16 @@ class TechnoSim {
       ctx.font = "13px monospace";
       ctx.fillStyle = "#88b090";
       const estadoMsg = miListo
-        ? (rivalListo ? "¡Ambas flotas listas! Iniciando combate..." : "Esperando que el rival confirme su flota...")
+        ? (rivalListo ? "¡Ambas flotas listas! Iniciando combate..." : "Esperando que " + nombreRival + " confirme su flota...")
         : "Click en un barco para seleccionarlo y rotarlo · click en otra celda para moverlo";
       ctx.fillText(estadoMsg, K.W / 2, 65);
     } else if (fase === "combate") {
       const miTurno = esMiTurno();
       ctx.fillStyle = miTurno ? "#39ff14" : "#ffb000";
-      ctx.fillText(miTurno ? "🎯 TU TURNO — DISPARA AL RADAR ENEMIGO" : "⏳ TURNO DEL RIVAL — ESPERANDO IMPACTO...", K.W / 2, 40);
+      const textoTurno = miTurno
+        ? "🎯 TU TURNO — DISPARA AL RADAR ENEMIGO"
+        : (net.esBot ? "⏳ TURNO DEL BOT — CALCULANDO COORDENADAS..." : "⏳ TURNO DEL RIVAL — ESPERANDO IMPACTO...");
+      ctx.fillText(textoTurno, K.W / 2, 40);
 
       ctx.font = "13px monospace";
       ctx.fillStyle = "#88b090";
@@ -5989,12 +6366,13 @@ let DPR = 1;
 
 let peer = null, conn = null, rol = null;
 let juego = null, juegoId = null;
-let enJuego = false, rivalCortado = false;
+let enJuego = false, rivalCortado = false, esBot = false;
 let pausa = { host: false, guest: false };
 const pausado = () => pausa.host || pausa.guest;
 
 const net = {
   get rol() { return rol; },
+  get esBot() { return esBot; },
   enviar(x) { try { if (conn && conn.open) conn.send(x); } catch (e) {} },
 };
 
@@ -6027,19 +6405,28 @@ window.addEventListener("resize", () => { if (juego && enJuego) ajustarCanvas(ju
 
 function limpiar() {
   if (juego && juego.destruir) { try { juego.destruir(); } catch (e) {} }
-  juego = null; enJuego = false; rivalCortado = false; pausa = { host: false, guest: false }; _fw = "";
+  juego = null; enJuego = false; rivalCortado = false; esBot = false; pausa = { host: false, guest: false }; _fw = "";
   try { if (conn) conn.close(); } catch (e) {}
   try { if (peer) peer.destroy(); } catch (e) {}
   conn = null; peer = null; rol = null;
 }
 function volverAlMenu() { limpiar(); $("overlay").classList.add("oculto"); verPanel("seljuego"); }
 
+function iniciarContraBot(id) {
+  if (peer) { try { peer.destroy(); } catch (e) {} peer = null; }
+  empezarJuego(id, 1, true);
+}
+
 // ---------- crear / unirse ----------
 function crearSala(id) {
   limpiar();
   juegoId = id;
   rol = 1;
+  esBot = false;
   verPanel("esperando");
+  const tieneBot = typeof BOTS !== "undefined" && !!BOTS[id];
+  const btnBot = $("btnJugarBot");
+  if (btnBot) btnBot.classList.toggle("oculto", !tieneBot);
   const codigo = PREFIJO + azar4().toLowerCase();
   $("codigoSala").textContent = codigo.replace(PREFIJO, "").toUpperCase();
   $("nombreJuegoSala").textContent = JUEGOS[id].nombre;
@@ -6092,10 +6479,10 @@ function unirse(codVis) {
   peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
 }
 
-function empezarJuego(id, r) {
+function empezarJuego(id, r, contraBot = false) {
   juego = JUEGOS[id];
   if (!juego) { $("estadoGuest").innerHTML = '<span class="err">Juego desconocido: ' + id + "</span>"; return; }
-  juegoId = id; rol = r;
+  juegoId = id; rol = r; esBot = !!contraBot;
   enJuego = true; rivalCortado = false; pausa = { host: false, guest: false }; _fw = "";
   ajustarCanvas(juego.canvas.w, juego.canvas.h);
   verPanel("juego");
@@ -6164,6 +6551,7 @@ function refrescarOverlay() {
 // ---------- botones ----------
 $("btnUnirse").onclick = () => unirse($("inputCodigo").value);
 $("inputCodigo").addEventListener("keydown", (e) => { if (e.key === "Enter") unirse($("inputCodigo").value); });
+if ($("btnJugarBot")) $("btnJugarBot").onclick = () => iniciarContraBot(juegoId);
 $("btnCancelar").onclick = volverAlMenu;
 $("btnCancelar2").onclick = volverAlMenu;
 $("btnMenu").onclick = volverAlMenu;
@@ -6218,7 +6606,10 @@ function master(now) {
   _mLast = now;
   if (!(dt > 0)) dt = 1 / 60;
   if (dt > 0.25) dt = 0.25;
-  if (enJuego && juego) { try { juego.frame(now, dt, pausado()); } catch (e) {} }
+  if (enJuego && juego) {
+    if (esBot && juego.botStep) { try { juego.botStep(dt); } catch (e) {} }
+    try { juego.frame(now, dt, pausado()); } catch (e) {}
+  }
   refrescarOverlay();
 }
 

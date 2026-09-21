@@ -26,12 +26,13 @@ let DPR = 1;
 
 let peer = null, conn = null, rol = null;
 let juego = null, juegoId = null;
-let enJuego = false, rivalCortado = false;
+let enJuego = false, rivalCortado = false, esBot = false;
 let pausa = { host: false, guest: false };
 const pausado = () => pausa.host || pausa.guest;
 
 const net = {
   get rol() { return rol; },
+  get esBot() { return esBot; },
   enviar(x) { try { if (conn && conn.open) conn.send(x); } catch (e) {} },
 };
 
@@ -64,19 +65,28 @@ window.addEventListener("resize", () => { if (juego && enJuego) ajustarCanvas(ju
 
 function limpiar() {
   if (juego && juego.destruir) { try { juego.destruir(); } catch (e) {} }
-  juego = null; enJuego = false; rivalCortado = false; pausa = { host: false, guest: false }; _fw = "";
+  juego = null; enJuego = false; rivalCortado = false; esBot = false; pausa = { host: false, guest: false }; _fw = "";
   try { if (conn) conn.close(); } catch (e) {}
   try { if (peer) peer.destroy(); } catch (e) {}
   conn = null; peer = null; rol = null;
 }
 function volverAlMenu() { limpiar(); $("overlay").classList.add("oculto"); verPanel("seljuego"); }
 
+function iniciarContraBot(id) {
+  if (peer) { try { peer.destroy(); } catch (e) {} peer = null; }
+  empezarJuego(id, 1, true);
+}
+
 // ---------- crear / unirse ----------
 function crearSala(id) {
   limpiar();
   juegoId = id;
   rol = 1;
+  esBot = false;
   verPanel("esperando");
+  const tieneBot = typeof BOTS !== "undefined" && !!BOTS[id];
+  const btnBot = $("btnJugarBot");
+  if (btnBot) btnBot.classList.toggle("oculto", !tieneBot);
   const codigo = PREFIJO + azar4().toLowerCase();
   $("codigoSala").textContent = codigo.replace(PREFIJO, "").toUpperCase();
   $("nombreJuegoSala").textContent = JUEGOS[id].nombre;
@@ -129,10 +139,10 @@ function unirse(codVis) {
   peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
 }
 
-function empezarJuego(id, r) {
+function empezarJuego(id, r, contraBot = false) {
   juego = JUEGOS[id];
   if (!juego) { $("estadoGuest").innerHTML = '<span class="err">Juego desconocido: ' + id + "</span>"; return; }
-  juegoId = id; rol = r;
+  juegoId = id; rol = r; esBot = !!contraBot;
   enJuego = true; rivalCortado = false; pausa = { host: false, guest: false }; _fw = "";
   ajustarCanvas(juego.canvas.w, juego.canvas.h);
   verPanel("juego");
@@ -201,6 +211,7 @@ function refrescarOverlay() {
 // ---------- botones ----------
 $("btnUnirse").onclick = () => unirse($("inputCodigo").value);
 $("inputCodigo").addEventListener("keydown", (e) => { if (e.key === "Enter") unirse($("inputCodigo").value); });
+if ($("btnJugarBot")) $("btnJugarBot").onclick = () => iniciarContraBot(juegoId);
 $("btnCancelar").onclick = volverAlMenu;
 $("btnCancelar2").onclick = volverAlMenu;
 $("btnMenu").onclick = volverAlMenu;
@@ -255,7 +266,10 @@ function master(now) {
   _mLast = now;
   if (!(dt > 0)) dt = 1 / 60;
   if (dt > 0.25) dt = 0.25;
-  if (enJuego && juego) { try { juego.frame(now, dt, pausado()); } catch (e) {} }
+  if (enJuego && juego) {
+    if (esBot && juego.botStep) { try { juego.botStep(dt); } catch (e) {} }
+    try { juego.frame(now, dt, pausado()); } catch (e) {}
+  }
   refrescarOverlay();
 }
 

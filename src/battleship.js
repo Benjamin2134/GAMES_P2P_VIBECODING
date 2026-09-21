@@ -295,9 +295,23 @@
     desc: "Batalla naval clásica 10x10. Flota completa, radar de sonar, disparos balísticos y niebla de guerra.",
     canvas: { w: K.W, h: K.H },
 
+    get sim() { return sim; },
+
+    botStep(dt) {
+      if (net.rol === 1 && sim && typeof BOTS !== "undefined" && BOTS.battleship) {
+        BOTS.battleship.step(sim, dt, (cx, cy, res) => {
+          reproducirAudioResultado(res.resultado);
+          enviarSnapshot();
+        });
+      }
+    },
+
     iniciarHost() {
       sim = new BattleshipSim();
       snap = null;
+      if (typeof BOTS !== "undefined" && BOTS.battleship) {
+        BOTS.battleship.reset();
+      }
       inicializarFlotaLocal();
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerdown", onPointerDown);
@@ -369,7 +383,9 @@
 
         return {
           texto: ganeYo ? "¡VICTORIA NAVAL!" : "FLOTA HUNDIDA",
-          sub: ganeYo ? "Has destruido todas las naves enemigas" : "El enemigo dominó los mares",
+          sub: ganeYo
+            ? (net.esBot ? "Has destruido la flota del Bot" : "Has destruido todas las naves enemigas")
+            : (net.esBot ? "El Bot naval dominó los mares" : "El enemigo dominó los mares"),
           revancha: true,
           revanchaPedida
         };
@@ -380,6 +396,12 @@
     revancha() {
       if (net.rol === 1 && sim) {
         sim.pedirRevancha(1);
+        if (net.esBot) {
+          sim.pedirRevancha(2);
+          if (typeof BOTS !== "undefined" && BOTS.battleship) {
+            BOTS.battleship.reset();
+          }
+        }
         inicializarFlotaLocal();
         enviarSnapshot();
       } else {
@@ -412,7 +434,7 @@
     renderTablero(TAB_PROPIO, "TU FLOTA / BASE NAVAL", true);
 
     // 3. Render Tablero Rival (Radar de Sonar)
-    renderTablero(TAB_RIVAL, "RADAR ENEMIGO (SONAR)", false);
+    renderTablero(TAB_RIVAL, net.esBot ? "RADAR ENEMIGO (BOT NAVAL)" : "RADAR ENEMIGO (SONAR)", false);
 
     // 4. Render Controles de Colocación
     if (fase === "colocacion") {
@@ -429,6 +451,7 @@
       const listos = (net.rol === 1 && sim) ? sim.listos : (snap ? snap.listos : { 1: false, 2: false });
       const miListo = listos[net.rol];
       const rivalListo = listos[net.rol === 1 ? 2 : 1];
+      const nombreRival = net.esBot ? "el Bot" : "el rival";
 
       ctx.fillStyle = "#39ff14";
       ctx.fillText("FASE DE DESPLIEGUE TÁCTICO", K.W / 2, 40);
@@ -436,13 +459,16 @@
       ctx.font = "13px monospace";
       ctx.fillStyle = "#88b090";
       const estadoMsg = miListo
-        ? (rivalListo ? "¡Ambas flotas listas! Iniciando combate..." : "Esperando que el rival confirme su flota...")
+        ? (rivalListo ? "¡Ambas flotas listas! Iniciando combate..." : "Esperando que " + nombreRival + " confirme su flota...")
         : "Click en un barco para seleccionarlo y rotarlo · click en otra celda para moverlo";
       ctx.fillText(estadoMsg, K.W / 2, 65);
     } else if (fase === "combate") {
       const miTurno = esMiTurno();
       ctx.fillStyle = miTurno ? "#39ff14" : "#ffb000";
-      ctx.fillText(miTurno ? "🎯 TU TURNO — DISPARA AL RADAR ENEMIGO" : "⏳ TURNO DEL RIVAL — ESPERANDO IMPACTO...", K.W / 2, 40);
+      const textoTurno = miTurno
+        ? "🎯 TU TURNO — DISPARA AL RADAR ENEMIGO"
+        : (net.esBot ? "⏳ TURNO DEL BOT — CALCULANDO COORDENADAS..." : "⏳ TURNO DEL RIVAL — ESPERANDO IMPACTO...");
+      ctx.fillText(textoTurno, K.W / 2, 40);
 
       ctx.font = "13px monospace";
       ctx.fillStyle = "#88b090";

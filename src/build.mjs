@@ -11,6 +11,7 @@ const rd = (f) => readFileSync(join(SRC, f), "utf8");
 const ORDEN = [
   "const.js", "audio.js",
   "pong.sim.js", "billar.sim.js", "spacewar.sim.js", "battleship.sim.js", "tron.sim.js", "monopoly.sim.js", "techno.sim.js",
+  "spacewar.bot.js", "battleship.bot.js",
   "pong.js", "billar.js", "spacewar.js", "battleship.js", "tron.js", "monopoly.js", "techno.js",
   "shell.js",
 ];

@@ -76,6 +76,12 @@
     nombre: "Spacewar 1979",
     desc: "Duelo de naves con inercia. Girá, empujá, dispará. Primero en quedarse sin vidas pierde.",
     canvas: { w: SW.W, h: SW.H },
+    get sim() { return sim; },
+    botStep(dt) {
+      if (sim && typeof BOTS !== "undefined" && BOTS.spacewar) {
+        BOTS.spacewar.step(sim, dt);
+      }
+    },
 
     iniciarHost() { sim = new SpacewarSim(); hAcc = 0; hSend = 0; hLast = performance.now(); ganadorPrev = 0; enganchar(); },
     iniciarGuest() {
@@ -177,7 +183,10 @@
       };
     },
     revancha() {
-      if (net.rol === 1 && sim) sim.pedirRevancha(1);
+      if (net.rol === 1 && sim) {
+        sim.pedirRevancha(1);
+        if (net.esBot) sim.pedirRevancha(2);
+      }
       else net.enviar(JSON.stringify({ t: "rev" }));
     },
   };
@@ -249,7 +258,8 @@
     ctx.fillText((miNum === 1 ? "VOS ▸ " : "") + "P1 " + "▲".repeat(Math.max(0, s.n1.vd)), 20, 26);
     ctx.textAlign = "right";
     ctx.fillStyle = SW.COL_P2;
-    ctx.fillText("P2 " + "▲".repeat(Math.max(0, s.n2.vd)) + (miNum === 2 ? " ◂ VOS" : ""), SW.W - 20, 26);
+    const etiquetaP2 = (net.esBot ? "BOT " : "P2 ") + "▲".repeat(Math.max(0, s.n2.vd)) + (miNum === 2 ? " ◂ VOS" : "");
+    ctx.fillText(etiquetaP2, SW.W - 20, 26);
     ctx.textAlign = "left";
   }
 })();

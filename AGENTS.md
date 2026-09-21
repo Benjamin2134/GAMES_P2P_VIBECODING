@@ -12,15 +12,16 @@ nada en Git, respetá esto.
 
 ```
 src/
-  const.js              núcleo: clamp, lerp, registro global JUEGOS
+  const.js              núcleo: clamp, lerp, registro global JUEGOS y BOTS
   audio.js              sintetizador Web Audio (RetroAudio) compartido
   shell.js              selector de juego + transporte P2P + loop maestro (rAF)
   peerjs.min.js         PeerJS 1.5.4 vendorizado
-  <juego>.sim.js        simulación autoritativa del juego (corre en el host)
+  <juego>.sim.js        simulación autoritativa del juego (corre en el host a 120 Hz)
+  <juego>.bot.js        cerebro heurístico del BOT Universal (toma decisiones de P2)
   <juego>.js            módulo del juego: input + netcode + render
   template.html         HTML + CSS con los marcadores /*__PEERJS__*/ y /*__BUNDLE__*/
   build.mjs             ensambla todo -> ../GAMESP2P.html
-  test.mjs              tests de la lógica pura de todas las sims
+  test.mjs              tests de la lógica pura de todas las sims y bots
 GAMESP2P.html           GENERADO. No editar a mano.
 ```
 
@@ -32,10 +33,12 @@ GAMESP2P.html           GENERADO. No editar a mano.
 ## 2. Agregar un juego nuevo
 
 1. `git checkout -b feature/<juego>`
-2. Crear `src/<juego>.sim.js` (clase de simulación) y `src/<juego>.js` (módulo).
+2. Crear `src/<juego>.sim.js` (clase de simulación), `src/<juego>.bot.js` (IA opcional/recomendada)
+   y `src/<juego>.js` (módulo de render).
    El módulo se registra solo: `JUEGOS.<juego> = { ... }` — aparece en el
-   selector automáticamente.
-3. Sumar los dos archivos a `ORDEN` en `src/build.mjs` (sims antes que módulos,
+   selector automáticamente. El bot se registra en `BOTS.<juego> = { ... }` — habilita
+   el botón de rescate `[ 🤖 Jugar contra BOT ahora ]`.
+3. Sumar los archivos a `ORDEN` en `src/build.mjs` (sims primero, bots en medio, módulos después,
    `shell.js` siempre al final) y sumar tests en `src/test.mjs`.
 4. `node src/test.mjs` y `node src/build.mjs`. Abrir `GAMESP2P.html`, probar.
 5. `git pull origin main`. Si `GAMESP2P.html` da conflicto: **no lo edites a
@@ -90,3 +93,32 @@ puntuales sobre canal no confiable, reenviar hasta ver el efecto en el snapshot
 `GAMESP2P.html` es autárquico. Doble clic, o subirlo a GitHub Pages / Netlify
 Drop / Cloudflare Pages. Cualquiera con el link entra, crea una sala de 4 letras
 y juega.
+
+## 7. Contrato de Bot Universal (IA Arcade)
+
+Todo juego puede ofrecer un modo en solitario contra el **BOT Universal**.
+La IA vive exclusivamente en `src/<juego>.bot.js` (desacoplada de la física y del render).
+
+### Contrato del Bot (`BOTS.<id>`):
+```js
+const MiJuegoBot = {
+  // El Host lo llama en cada rAF si el rival es el Bot.
+  // Recibe la instancia de la simulación autoritativa y el dt.
+  step(sim, dt) {
+    // 1. Lee estado público de sim (coordenadas, velocidades, etc.)
+    // 2. Calcula la acción con heurísticas clásicas (120 Hz)
+    // 3. Aplica los inputs del Jugador 2 (ej: sim.aplicarInputGuest(...))
+  }
+};
+if (typeof BOTS !== "undefined") BOTS.miJuego = MiJuegoBot;
+```
+
+### Las 3 Reglas de Oro del Bot:
+1. **Fair Play (Anti-X-Ray):** El bot solo puede consultar información que un humano vería en pantalla. Prohibido leer datos ocultos del rival (ej: flota oculta en Battleship).
+2. **Latencia Humana:** No reaccionar en 0 ms ante cualquier cambio de estado; mantener márgenes de reacción y zonas muertas humanas (100–150 ms en tiempo real, 600–1100 ms en turnos) para que el juego sea desafiante pero ganable.
+3. **Física Clampeada:** El bot debe respetar estrictamente los mismos límites de velocidad, aceleración, cooldowns y consumo de recursos que un jugador real.
+
+### Bots Implementados:
+- **Spacewar 1979** (`src/spacewar.bot.js`): Navegación newtoniana, intercepción balística toroidal (*lead target*) y evasión de torpedos.
+- **Battleship** (`src/battleship.bot.js`): Algoritmo clásico *Hunt & Target* con paridad de tablero de ajedrez (reducción de búsqueda al 50%) y seguimiento direccional ortogonal de impactos.
+

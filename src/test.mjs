@@ -16,9 +16,11 @@ const codigo = [
   rd("battleship.sim.js"),
   rd("tron.sim.js"),
   rd("monopoly.sim.js"),
-  rd("techno.sim.js")
+  rd("techno.sim.js"),
+  rd("spacewar.bot.js"),
+  rd("battleship.bot.js")
 ].join("\n") +
-  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim, BATTLESHIP, BattleshipSim, TRON, TronSim, MONOPOLY, MonopolySim, TECHNO, TechnoSim };";
+  "\nglobalThis.__api = { PONG, PongSim, BILLAR, BillarSim, _tipo, _otro, SW, SpacewarSim, BATTLESHIP, BattleshipSim, TRON, TronSim, MONOPOLY, MonopolySim, TECHNO, TechnoSim, BOTS, SpacewarBot, BattleshipBot };";
 
 const sb = { performance: { now: () => Date.now() }, Math, setTimeout: (fn) => fn() };
 vm.createContext(sb);
@@ -386,5 +388,111 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
   t("techno: resyncFromHost alinea el bpm", g4.bpm === 150);
 }
 
+// ================= SPACEWAR BOT =================
+{
+  const sim = new A.SpacewarSim();
+  t("spacewar bot: registrado en BOTS.spacewar", typeof A.BOTS !== "undefined" && typeof A.BOTS.spacewar === "object");
+
+  // Step con rival invulnerable
+  sim.naves[1].invuln = 2.0;
+  const inp1 = A.SpacewarBot.step(sim, 1 / 60);
+  t("spacewar bot: genera rotacion valida (-1, 0 o 1)", inp1 && [-1, 0, 1].includes(inp1.rot));
+  t("spacewar bot: no dispara si el rival es invulnerable", inp1 && inp1.fire === false);
+
+  // Alineado hacia rival vulnerable
+  sim.naves[1].invuln = 0;
+  sim.naves[2].x = 500; sim.naves[2].y = 270; sim.naves[2].ang = Math.PI;
+  sim.naves[1].x = 300; sim.naves[1].y = 270; sim.naves[1].vx = 0; sim.naves[1].vy = 0;
+  const inp2 = A.SpacewarBot.step(sim, 1 / 60);
+  t("spacewar bot: dispara cuando esta alineado y a rango", inp2 && inp2.fire === true);
+
+  // Limite de velocidad con thrust
+  for (let i = 0; i < 60; i++) {
+    A.SpacewarBot.step(sim, 1 / 60);
+    sim.step(1 / 60);
+  }
+  const spBot = Math.hypot(sim.naves[2].vx, sim.naves[2].vy);
+  t("spacewar bot: velocidad fisica respetada dentro de VEL_MAX", spBot <= A.SW.VEL_MAX + 0.1);
+}
+
+// ================= BATTLESHIP BOT =================
+{
+  const bot = A.BattleshipBot;
+  t("battleship bot: registrado en BOTS.battleship", typeof A.BOTS !== "undefined" && typeof A.BOTS.battleship === "object");
+
+  bot.reset();
+  t("battleship bot: reset() arranca en hunt mode", bot._modo === "hunt" && bot._impactosPendientes.length === 0);
+
+  // Colocacion
+  const sim = new A.BattleshipSim();
+  t("battleship bot: colocacion arranca en sim", sim.fase === "colocacion");
+
+  // Paso de tiempo para que el bot confirme su flota
+  bot.step(sim, 0.1);
+  t("battleship bot: no confirma antes de los 300ms", !sim.listos[2]);
+  bot.step(sim, 0.25);
+  t("battleship bot: confirma flota valida de 5 barcos tras timer", sim.listos[2] && sim.flotas[2].length === 5);
+
+  // El humano confirma su flota
+  const flotaHumano = sim.generarFlotaAleatoria();
+  sim.confirmarFlota(1, flotaHumano);
+  t("battleship bot: inicio de combate tras confirmar ambos", sim.fase === "combate");
+
+  // Fair play y seleccion de tiro en Hunt Mode
+  const tableroDisparos = Array.from({ length: 10 }, () => Array(10).fill(0));
+  const tiro1 = bot.obtenerSiguienteDisparo(tableroDisparos);
+  t("battleship bot: tiro en rango [0..9]", tiro1 && tiro1.x >= 0 && tiro1.x < 10 && tiro1.y >= 0 && tiro1.y < 10);
+  t("battleship bot: tiro inicial respeta paridad (x+y)%2===0", (tiro1.x + tiro1.y) % 2 === 0);
+
+  // Target Mode: tras impacto en (4, 4)
+  bot.reset();
+  bot._impactosPendientes = [{ x: 4, y: 4 }];
+  bot._modo = "target";
+  const tiroTarget = bot.obtenerSiguienteDisparo(tableroDisparos);
+  const esVecino = Math.abs(tiroTarget.x - 4) + Math.abs(tiroTarget.y - 4) === 1;
+  t("battleship bot: target mode elige vecino ortogonal", esVecino);
+
+  // Target Mode con 2 impactos en linea: (4, 4) y (4, 5)
+  bot.reset();
+  bot._impactosPendientes = [{ x: 4, y: 4 }, { x: 4, y: 5 }];
+  bot._modo = "target";
+  const tiroLinea = bot.obtenerSiguienteDisparo(tableroDisparos);
+  const esExtremoVertical = (tiroLinea.x === 4 && tiroLinea.y === 3) || (tiroLinea.x === 4 && tiroLinea.y === 6);
+  t("battleship bot: 2 impactos en linea prioriza extremos de columna", esExtremoVertical);
+
+  // Hundido: componente conexo se remueve
+  bot._removerBarcoHundido(4, 5);
+  t("battleship bot: tras hundir remueve el barco conexo y vuelve a hunt", bot._impactosPendientes.length === 0 && bot._modo === "hunt");
+
+  // Simulacion de partida completa Bot vs Disparos Aleatorios
+  const simPartida = new A.BattleshipSim();
+  bot.reset();
+  const f1 = simPartida.generarFlotaAleatoria();
+  const f2 = simPartida.generarFlotaAleatoria();
+  simPartida.confirmarFlota(1, f1);
+  simPartida.confirmarFlota(2, f2);
+
+  let iteraciones = 0;
+  while (simPartida.fase === "combate" && iteraciones < 300) {
+    iteraciones++;
+    if (simPartida.turno === 1) {
+      const libres = [];
+      for (let y = 0; y < 10; y++) {
+        for (let x = 0; x < 10; x++) {
+          if (simPartida.disparos[2][y][x] === 0) libres.push({ x, y });
+        }
+      }
+      if (libres.length > 0) {
+        const c = libres[Math.floor(Math.random() * libres.length)];
+        simPartida.disparar(1, c.x, c.y);
+      }
+    } else {
+      bot.step(simPartida, 1.5);
+    }
+  }
+  t("battleship bot: partida completa finaliza limpiamente con ganador", simPartida.fase === "fin" && (simPartida.ganador === 1 || simPartida.ganador === 2));
+}
+
 console.log(`\n${ok} OK, ${fail} FAIL`);
 process.exit(fail ? 1 : 0);
+
