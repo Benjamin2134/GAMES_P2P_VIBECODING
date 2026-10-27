@@ -1,4 +1,5 @@
-// Tests de logica pura (sin navegador): Pong, Billar, Spacewar, Battleship, Tron, Monopoly y Techno.
+// Tests de logica pura (sin navegador): Pong, Billar, Spacewar, Battleship, Tron, Monopoly y Techno,
+// mas los juegos del setlist (test.setlist.mjs).
 //   node src/test.mjs
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
@@ -491,6 +492,14 @@ const t = (n, c) => { c ? ok++ : (fail++, console.log("  FAIL: " + n)); };
     }
   }
   t("battleship bot: partida completa finaliza limpiamente con ganador", simPartida.fase === "fin" && (simPartida.ganador === 1 || simPartida.ganador === 2));
+}
+
+// ================= SETLIST (juegos sobre el kit) =================
+{
+  const { testsSetlist } = await import("./test.setlist.mjs");
+  testsSetlist(t);
+  const { testsRed } = await import("./test.red.mjs");
+  testsRed(t);
 }
 
 console.log(`\n${ok} OK, ${fail} FAIL`);
