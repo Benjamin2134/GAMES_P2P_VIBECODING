@@ -210,6 +210,32 @@
   .games-section {
     padding: 20px 0 70px;
   }
+  .filtros {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: -8px 0 20px;
+  }
+  .chip {
+    font-family: 'Urbanist', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  .chip:hover { color: var(--text); border-color: #444; }
+  .chip.activo { color: #111; background: var(--accent); border-color: var(--accent); }
+  .game-cover-bot {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    font-size: 0.85rem;
+    opacity: 0.85;
+  }
   .games-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -284,6 +310,24 @@
   }
 
   /* How it works */
+  .accesos-section { padding: 0 0 70px; }
+  .accesos-sub { color: var(--text-muted); margin: -14px 0 18px; font-size: 0.95rem; }
+  .accesos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .acceso-card {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 64px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); text-decoration: none; position: relative; cursor: pointer; font: inherit;
+  }
+  .acceso-card:hover { border-color: var(--accent); }
+  .acceso-ini { width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center; font-family: 'Unbounded', sans-serif; font-size: 1rem; flex: none; }
+  .acceso-txt { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+  .acceso-txt b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acceso-txt small { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acceso-x { position: absolute; top: 4px; right: 6px; background: none; border: 0; color: var(--text-muted); font-size: 1.1rem; cursor: pointer; padding: 2px 6px; }
+  .acceso-x:hover { color: #f87171; }
+  .acceso-mas { justify-content: center; color: var(--text-muted); border-style: dashed; background: transparent; }
+  .acceso-form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .acceso-form input { flex: 1 1 200px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-bg); color: var(--text); font: inherit; }
   .how-section {
     padding: 20px 0 80px;
   }
@@ -563,7 +607,20 @@
 
     <section class="games-section">
       <h2 class="section-title">Hostea un juego</h2>
+      <div id="filtros" class="filtros"></div>
       <div id="listaJuegos" class="games-grid"></div>
+    </section>
+
+    <section class="accesos-section">
+      <h2 class="section-title">Accesos directos</h2>
+      <p class="accesos-sub">Guarda tus juegos de navegador favoritos para abrirlos desde aquí. Quedan guardados solo en este navegador.</p>
+      <div id="listaAccesos" class="accesos-grid"></div>
+      <form id="formAcceso" class="acceso-form oculto">
+        <input id="accNombre" maxlength="40" placeholder="Nombre del juego" required>
+        <input id="accUrl" inputmode="url" placeholder="Dirección (https://…)" required>
+        <button type="submit" class="btn-unirte">Guardar</button>
+        <button type="button" id="accCancelar" class="btn-secondary">Cancelar</button>
+      </form>
     </section>
 
     <section class="how-section">
@@ -630,7 +687,7 @@
       <button id="btnMenu" class="oculto btn-secondary" style="margin-top: 6px;">Volver al menú</button>
     </div>
   </div>
-  <div class="ayuda">
+  <div class="ayuda" id="ayuda">
     <b>Pong:</b> <kbd>W</kbd>/<kbd>S</kbd> o flechas. &nbsp;·&nbsp;
     <b>Billar:</b> mouse o flechas + <kbd>espacio</kbd>. &nbsp;·&nbsp;
     <b>Spacewar:</b> <kbd>←</kbd>/<kbd>→</kbd> girar, <kbd>↑</kbd> empuje, <kbd>espacio</kbd> disparar. &nbsp;·&nbsp;

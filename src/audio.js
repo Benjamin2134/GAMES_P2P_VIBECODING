@@ -401,10 +401,57 @@ const RetroAudio = (() => {
     droneOsc1 = droneOsc2 = droneFilt = droneGain = droneLfo = null;
   }
 
+  // Genericos para los juegos del setlist (kit.ui.js arma sus efectos con estos dos).
+  // tono: oscilador con envolvente corta y glissando opcional hasta freqFin.
+  function tono(freq, dur = 0.1, tipo = "square", vol = 0.12, freqFin = 0, retardo = 0) {
+    if (silenciado || !ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const t0 = ctx.currentTime + retardo;
+      osc.type = tipo;
+      osc.frequency.setValueAtTime(freq, t0);
+      if (freqFin > 0) osc.frequency.exponentialRampToValueAtTime(freqFin, t0 + dur);
+      gain.gain.setValueAtTime(0.001, t0);
+      gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    } catch (e) {}
+  }
+
+  // ruido: rafaga de ruido blanco filtrado (golpes, dados, cartas, explosiones chicas).
+  function ruido(dur = 0.15, vol = 0.18, filtroHz = 1500, retardo = 0) {
+    if (silenciado || !ctx) return;
+    try {
+      const n = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const filt = ctx.createBiquadFilter();
+      filt.type = "lowpass";
+      filt.frequency.value = filtroHz;
+      const gain = ctx.createGain();
+      const t0 = ctx.currentTime + retardo;
+      gain.gain.setValueAtTime(vol, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      src.connect(filt);
+      filt.connect(gain);
+      gain.connect(ctx.destination);
+      src.start(t0);
+    } catch (e) {}
+  }
+
   return {
     init,
     toggleMute,
     isMuted,
+    tono,
+    ruido,
     playLaser,
     startThrust,
     stopThrust,

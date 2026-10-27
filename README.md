@@ -26,11 +26,21 @@ Arcade multijugador retro 100% P2P (Peer-to-Peer a 120 Hz) sin servidor intermed
    samples). El reloj corre **local e independiente en cada máquina**: la red solo sincroniza qué
    ficha está prendida, nunca el audio — así no se corta ni se desfasa por el jitter de la conexión.
 
+### Setlist: 28 juegos nuevos sobre el kit (todos con 🤖 BOT salvo Pinturillo)
+| Tipo | Juegos |
+|---|---|
+| Tablero | 🔴 **Conecta 4** · ⚫ **Reversi** · ⛀ **Damas** (chilenas: captura obligatoria, dama voladora) · ♞ **Ajedrez** (reglas FIDE completas) · #️⃣ **Tres en Raya Ultimate** · ⚪ **Gomoku** · 🫘 **Mancala** (Kalah 6×4) |
+| Cartas, dados y palabras | 🃏 **Memorice** · 🁫 **Dominó** (doble seis a 50) · 🎲 **Dudo / Cacho** · 🎯 **Generala** · 🪢 **Ahorcado** · 🎨 **Pinturillo** |
+| Turnos con física | 💣 **Artillería** (terreno destructible, viento) · ⛳ **Minigolf** (6 hoyos) · 🥌 **Curling** (giro y barrido) |
+| Tiempo real | 🏒 **Air Hockey** · 🐍 **Snake Duelo** · 🔴 **Sumo** · ⚡ **Duelo de Reflejos** · 🛡️ **Tanques** · 👻 **Pac-Duelo** · 💣 **Bomberman Duelo** · 🧱 **Tetris Versus** · 🧱 **Breakout Versus** · 🚗 **Fútbol de Autos** · 👾 **Invasores Versus** · 🏎️ **Carrera** |
+
+Reglas y controles de cada uno: en la ayuda bajo el canvas al jugar, y en `SETLIST.md`.
+
 ---
 
 ## 🛠️ Comandos de Desarrollo
 ```bash
-# Correr tests unitarios sin navegador
+# Correr tests unitarios sin navegador (incluye partidas bot contra bot y red con pérdida)
 node src/test.mjs
 
 # Compilar GAMESP2P.html e index.html autocontenido

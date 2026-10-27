@@ -46,6 +46,22 @@ GAMESP2P.html           GENERADO. No editar a mano.
 6. `git push origin feature/<juego>` → Pull Request. Se commitean `src/` **y**
    `GAMESP2P.html` juntos (para jugar/hostear sin Node).
 
+### 2b. Camino corto: juego sobre el kit (así están hechos los 28 del setlist)
+
+`src/kit.js` (lógica pura) y `src/kit.ui.js` (navegador) resuelven red, bot, botones y efectos:
+
+- **Sim** = `class X extends SimBase` con `accion(j, a)` (discreta), `input(j, i)` (continua),
+  `step(dt)` (opcional, paso fijo) y `vista(r)` = lo que ve el jugador `r` (**nunca** info oculta
+  del otro). `this.emitir(tipo, datos)` para sonidos/efectos, `this.terminar(g)` (1, 2 o 3 = empate).
+  Registrar con `Kit.SIMS.x = X`.
+- **Módulo** = `Kit.juego({ id, nombre, desc, ayuda, meta, tipo, canvas, Sim, pintar, teclado, puntero, evento, ... })`.
+  El guest manda acciones numeradas que se reenvían hasta el *ack* del host (canal no confiable),
+  y con `continuo: true` manda `J.inp` en cada frame.
+- **Bot** = `BOTS.x = { nuevo() { return { step(vista, api, dt) } } }`, o `Kit.botTurnos(elegir)` para
+  turnos. Recibe la misma vista que un humano (Fair Play por construcción).
+- Sumar el id a `src/setlist.mjs` (build y tests lo leen) y sus tests en `src/test.setlist.mjs`.
+  Cada juego con bot se prueba con una partida completa bot contra bot.
+
 ## 3. Contrato de un módulo de juego (`JUEGOS.<id>`)
 
 ```js
